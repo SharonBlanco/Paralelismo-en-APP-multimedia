@@ -7,12 +7,12 @@ Este documento define las pruebas que evidencian lo que pide el enunciado: **car
 ## 0. Preparación
 
 1. Levantar el coordinador y los tres workers, cada uno en su PC (ver README).
-2. Verificar en el dashboard que los tres workers aparezcan **libres** y con **✓ v3**, y que cada pool tenga al menos un worker.
+2. Verificar en el dashboard que los tres workers aparezcan **libres** y con **v3**, y que cada pool tenga al menos un worker.
 3. Generar el dataset en la máquina que hará de cliente:
    ```bash
    python scripts/generar_dataset.py
    ```
-4. Anotar la composición del dataset (`dataset_prueba/composicion.json`):
+4. Anotar la composición del dataset (`dataset_prueba/composicion.json`). Después de enviar la carga, la sección **Variedad de archivos recibidos** del dashboard muestra lo mismo en gráficos: tomar una captura como evidencia de la diversidad de tipos, formatos y tamaños.
 
 | Dato | Valor |
 |---|---|
@@ -140,7 +140,7 @@ python cliente/cliente.py carga ./dataset_prueba --max-casos 15 --concurrentes 4
 
 1. Enviar un caso con videos pesados.
 2. Cuando un worker esté procesando un video (detalle del caso con %), cortarlo de golpe: desconectar el cable o Wi-Fi, apagar la PC o ejecutar `docker kill <contenedor>`.
-3. Observar que la sub-tarea pasa a otro worker (↻1 en el detalle; en la consola del coordinador aparece `redistribuida: X → Y`) y que a los 15 s el worker caído aparece **desconectado**.
+3. Observar que la sub-tarea pasa a otro worker ("redistribuida" en el detalle; en la consola del coordinador aparece `redistribuida: X → Y`) y que a los 15 s el worker caído aparece **desconectado**.
 
 | Sub-tarea | Worker original | % al caer | Worker que la retomó | Tiempo hasta retomarla | Estado final del caso |
 |---|---|---|---|---|---|

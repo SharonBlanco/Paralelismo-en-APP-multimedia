@@ -14,7 +14,7 @@ En la parte superior se ven los casos totales, en proceso y completados, los wor
 
 ### 1.2 Colas por pool
 
-Una tarjeta por pool (`video`, `audio`, `ligera`) muestra cuántas sub-tareas **esperan** en RabbitMQ y cuántos workers lo atienden. Si hay sub-tareas esperando y ningún worker atiende ese pool, aparece **⚠ nadie atiende este pool**: hay que levantar un worker genérico o uno de ese pool.
+Una tarjeta por pool (`video`, `audio`, `ligera`) muestra cuántas sub-tareas **esperan** en RabbitMQ y cuántos workers lo atienden. Si hay sub-tareas esperando y ningún worker atiende ese pool, aparece **nadie atiende este pool**: hay que levantar un worker genérico o uno de ese pool.
 
 ### 1.3 Enviar un caso
 
@@ -38,13 +38,13 @@ Para cada worker se muestra:
 | CPU / Memoria | Último uso reportado |
 | Tareas | Sub-tareas que está procesando ahora |
 | Procesadas | Sub-tareas que terminó en total (muestra el reparto de carga) |
-| Versión | **✓ v3** si corre la versión actual; **⚠ desactualizado** si hay que reiniciarlo o reconstruir su imagen |
+| Versión | **v3** si corre la versión actual; **desactualizado** si hay que reiniciarlo o reconstruir su imagen |
 
 Los workers desconectados quedan en gris al final y se pueden quitar de la lista con **Quitar**.
 
 ### 1.5 Casos de procesamiento
 
-Cada fila muestra el estado agregado del caso, una barra de progreso y el desglose de sub-tareas: ⏳ en espera · ⚙ en ejecución · ✓ completadas · ✗ fallidas · ⊘ canceladas.
+Cada fila muestra el estado agregado del caso, una barra de progreso y el desglose de sub-tareas: en espera, en ejecución, completadas, fallidas y canceladas.
 
 | Estado | Significado |
 |---|---|
@@ -68,14 +68,25 @@ Muestra el **resumen agregado** (por ejemplo: "De 15 archivos (6 audios, 6 imág
 
 - **Descargar:** baja el archivo resultante.
 - **Ver error:** pase el mouse para leer el motivo del fallo.
-- ⟳N indica reintentos y ↻N indica que la sub-tarea pasó a otro worker porque el anterior se cayó.
+- "N reintento(s)" indica reintentos y "redistribuida" indica que la sub-tarea pasó a otro worker porque el anterior se cayó.
 
 Botones:
 
 - **Ver reporte consolidado:** abre el reporte del caso en una pestaña nueva, con el botón **Imprimir / PDF**.
 - **Descargar JSON:** el mismo reporte en formato JSON.
 
-### 1.7 Trazabilidad
+### 1.7 Variedad de archivos recibidos
+
+Resume todos los archivos enviados al sistema, para mostrar la variedad del dataset:
+
+- **Resumen:** cantidad de archivos, volumen total, formatos distintos y tamaño mínimo, mediano y máximo.
+- **Archivos por tipo:** cantidad y volumen de video, audio, imagen y otros.
+- **Formatos:** cuántos archivos hay de cada extensión, con el color de su tipo.
+- **Distribución de tamaños:** cuántos archivos caen en cada rango (menos de 100 KB, 100 KB a 1 MB, 1 a 10 MB, 10 a 50 MB, más de 50 MB), separados por tipo.
+
+Al pasar el mouse sobre una barra se ve el detalle, y **Ver datos en tabla** muestra los mismos números en una tabla.
+
+### 1.8 Trazabilidad
 
 - **Selector de caso:** últimos 5 casos o uno en particular.
 - **Resumen:** workers que participaron, máximo de sub-tareas en paralelo, tiempo real, tiempo si fuera secuencial y **aceleración (speedup)**.

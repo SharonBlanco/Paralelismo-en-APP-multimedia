@@ -100,7 +100,7 @@ cd worker
 COORDINATOR_IP=192.168.1.100 WORKER_ID=worker-2 python worker.py
 ```
 
-> Cada vez que cambie `worker.py` hay que reiniciar el worker y, si usa Docker, reconstruir la imagen. El dashboard marca **⚠ desactualizado** a los workers con una versión vieja.
+> Cada vez que cambie `worker.py` hay que reiniciar el worker y, si usa Docker, reconstruir la imagen. El dashboard marca **desactualizado** a los workers con una versión vieja.
 
 ---
 

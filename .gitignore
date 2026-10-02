@@ -1,0 +1,19 @@
+# Entorno virtual de Python
+.venv/
+__pycache__/
+*.pyc
+
+# Datos que genera el sistema al usarse (cada uno tiene los suyos)
+uploads/
+results/
+worker/workspace/
+workspace/
+
+# Dataset generado (se recrea con scripts/generar_dataset.py) y salidas de pruebas
+dataset_prueba/
+resultados_descargados/
+
+# Editor / sistema
+.vscode/
+.idea/
+.DS_Store

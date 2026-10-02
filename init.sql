@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS subtasks (
     file_name       VARCHAR(300)    NOT NULL,
     file_path       VARCHAR(500)    NOT NULL,
     file_type       VARCHAR(20)     NOT NULL,
+    file_size       BIGINT,                      -- tamaño en bytes del archivo original
     operation       VARCHAR(50)     NOT NULL,
     target_format   VARCHAR(10),
     status          VARCHAR(20)     DEFAULT 'pending',

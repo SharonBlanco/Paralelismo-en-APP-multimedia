@@ -299,10 +299,10 @@ def set_paused(pause: bool):
         for tag in consumer["tags"]:
             channel.basic_cancel(tag)
         consumer["tags"] = []
-        print(f"  [⏸] CPU saturada: {WORKER_ID} deja de tomar sub-tareas nuevas")
+        print(f"  [pausa] CPU saturada: {WORKER_ID} deja de tomar sub-tareas nuevas")
     elif not pause and not consumer["tags"]:
         subscribe(channel)
-        print(f"  [▶] CPU normal: {WORKER_ID} vuelve a tomar sub-tareas")
+        print(f"  [reanuda] CPU normal: {WORKER_ID} vuelve a tomar sub-tareas")
 
 
 def handle_message(connection, channel, delivery_tag, redelivered, body):

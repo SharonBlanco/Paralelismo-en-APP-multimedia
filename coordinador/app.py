@@ -150,6 +150,7 @@ def ensure_schema():
         ALTER TABLE subtasks ADD COLUMN IF NOT EXISTS retries INT DEFAULT 0;
         ALTER TABLE subtasks ADD COLUMN IF NOT EXISTS reassignments INT DEFAULT 0;
         ALTER TABLE subtasks ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMP;
+        ALTER TABLE subtasks ADD COLUMN IF NOT EXISTS file_size BIGINT;
         ALTER TABLE workers  ADD COLUMN IF NOT EXISTS pools VARCHAR(100);
         ALTER TABLE workers  ADD COLUMN IF NOT EXISTS concurrency INT DEFAULT 1;
     """)
@@ -247,6 +248,7 @@ async def submit_case(
         with open(file_path, "wb") as fp:
             shutil.copyfileobj(f.file, fp)
 
+        size = file_path.stat().st_size
         for task in determine_subtasks(f.filename):
             all_subtasks.append({
                 "subtask_id": f"st-{uuid.uuid4().hex[:8]}",
@@ -254,6 +256,7 @@ async def submit_case(
                 "file_name": f.filename,
                 "file_path": str(file_path),
                 "file_type": file_type_of(f.filename),
+                "file_size": size,
                 **task,
             })
 
@@ -272,19 +275,19 @@ async def submit_case(
         if st["pool"]:
             cur.execute("""
                 INSERT INTO subtasks (subtask_id, case_id, file_name, file_path, file_type,
-                                      operation, target_format, pool, status)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'pending')
+                                      file_size, operation, target_format, pool, status)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending')
             """, (st["subtask_id"], case_id, st["file_name"], st["file_path"], st["file_type"],
-                  st["operation"], st["target_format"], st["pool"]))
+                  st["file_size"], st["operation"], st["target_format"], st["pool"]))
         else:
             # Formato no soportado: se resuelve aquí mismo, sin gastar un worker
             ext = Path(st["file_name"]).suffix or "(sin extensión)"
             cur.execute("""
                 INSERT INTO subtasks (subtask_id, case_id, file_name, file_path, file_type,
-                                      operation, status, error_message, finished_at)
-                VALUES (%s,%s,%s,%s,%s,'unsupported','failed',%s,NOW())
+                                      file_size, operation, status, error_message, finished_at)
+                VALUES (%s,%s,%s,%s,%s,%s,'unsupported','failed',%s,NOW())
             """, (st["subtask_id"], case_id, st["file_name"], st["file_path"], st["file_type"],
-                  f"Formato no soportado: {ext}"))
+                  st["file_size"], f"Formato no soportado: {ext}"))
     db.commit()
 
     if queued:
@@ -557,7 +560,7 @@ def delete_case(case_id: str):
         if _inside(base, folder):
             shutil.rmtree(folder, ignore_errors=True)
 
-    print(f"  [🗑] Caso {case_id} eliminado ({deleted_subtasks} sub-tareas)")
+    print(f"  [x] Caso {case_id} eliminado ({deleted_subtasks} sub-tareas)")
     return {"deleted": case_id, "subtasks": deleted_subtasks}
 
 
@@ -1006,7 +1009,7 @@ def save_report_safe(case_id: str):
     """Genera el reporte sin interrumpir el flujo si algo falla"""
     try:
         path = save_report(case_id)
-        print(f"  [📋] Reporte consolidado: {path}")
+        print(f"  [R] Reporte consolidado: {path}")
     except Exception as e:
         print(f"  [!] No se pudo generar el reporte de {case_id}: {e}")
 
@@ -1103,7 +1106,7 @@ def report_page(case_id: str):
                         f'{e(_plural(n, TYPE_LABELS.get(current_type, (current_type,) * 2)).capitalize())}</td></tr>')
         for i, s in enumerate(f["subtasks"]):
             if s["status"] == "completed":
-                detail = f'<a href="{s["result_url"]}">Descargar</a>' if s["result_url"] else "✓"
+                detail = f'<a href="{s["result_url"]}">Descargar</a>' if s["result_url"] else "Listo"
             elif s["status"] == "failed":
                 detail = f'<span class="bad">{e((s["error_message"] or "")[:200])}</span>'
             else:
@@ -1121,8 +1124,7 @@ def report_page(case_id: str):
                    if i == 0 else "")
                 + f'<td>{e(OPERATION_LABELS.get(s["operation"], s["operation"]))}'
                   f'{" → " + e(s["target_format"]) if s["target_format"] else ""}</td>'
-                + f'<td><span class="status {s["status"]}">{"✓ " if s["status"] == "completed" else "✗ " if s["status"] == "failed" else ""}'
-                  f'{e(STATUS_LABELS.get(s["status"], s["status"]))}</span></td>'
+                + f'<td><span class="status {s["status"]}">{e(STATUS_LABELS.get(s["status"], s["status"]))}</span></td>'
                 + f'<td class="nw">{e(s["worker"])}</td><td class="nw">{_fmt_time(s["started_at"])}</td>'
                 + f'<td class="nw">{_fmt_time(s["finished_at"])}</td><td class="nw">{_fmt_dur(s["duration_seconds"])}</td>'
                 + f"<td>{detail}</td></tr>")
@@ -1287,6 +1289,74 @@ def get_trace(case_id: str | None = None, last_cases: int = 5):
     return {"now": to_local(now).isoformat(), "subtasks": subtasks, "workers": workers}
 
 
+SIZE_BUCKETS = [
+    ("< 100 KB", 100 * 1024),
+    ("100 KB – 1 MB", 1024 ** 2),
+    ("1 – 10 MB", 10 * 1024 ** 2),
+    ("10 – 50 MB", 50 * 1024 ** 2),
+    ("> 50 MB", None),
+]
+
+
+@app.get("/api/dataset")
+def dataset_stats():
+    """
+    Variedad de los archivos recibidos (todos los casos): cantidad y volumen
+    por tipo, por formato y distribución de tamaños.
+    """
+    db = get_db()
+    cur = db.cursor()
+    cur.execute("""
+        SELECT case_id, file_name, MIN(file_type) AS file_type,
+               MAX(file_size) AS file_size, MIN(file_path) AS file_path
+        FROM subtasks GROUP BY case_id, file_name
+    """)
+    files = cur.fetchall()
+
+    # Archivos de casos anteriores a esta versión: medir el tamaño en disco
+    for f in files:
+        if f["file_size"] is None and f["file_path"] and Path(f["file_path"]).is_file():
+            f["file_size"] = Path(f["file_path"]).stat().st_size
+            cur.execute("UPDATE subtasks SET file_size=%s WHERE case_id=%s AND file_name=%s",
+                        (f["file_size"], f["case_id"], f["file_name"]))
+    db.commit()
+    cur.close()
+    db.close()
+
+    by_type, by_format = {}, {}
+    buckets = [{"label": label, "by_type": {}} for label, _ in SIZE_BUCKETS]
+    sizes = []
+    for f in files:
+        t = f["file_type"]
+        ext = (Path(f["file_name"]).suffix.lower().lstrip(".") or "sin extensión")
+        size = f["file_size"] or 0
+        bt = by_type.setdefault(t, {"count": 0, "bytes": 0})
+        bt["count"] += 1
+        bt["bytes"] += size
+        bf = by_format.setdefault(ext, {"format": ext, "file_type": t, "count": 0, "bytes": 0})
+        bf["count"] += 1
+        bf["bytes"] += size
+        if f["file_size"] is not None:
+            sizes.append(size)
+            for b, (_, limit) in zip(buckets, SIZE_BUCKETS):
+                if limit is None or size < limit:
+                    b["by_type"][t] = b["by_type"].get(t, 0) + 1
+                    break
+
+    sizes.sort()
+    return {
+        "files": len(files),
+        "bytes": sum(sizes),
+        "measured": len(sizes),
+        "min": sizes[0] if sizes else None,
+        "median": sizes[len(sizes) // 2] if sizes else None,
+        "max": sizes[-1] if sizes else None,
+        "by_type": by_type,
+        "by_format": sorted(by_format.values(), key=lambda x: -x["count"]),
+        "size_buckets": buckets,
+    }
+
+
 @app.get("/api/stats")
 def get_stats():
     """Estadísticas generales para el dashboard"""
@@ -1398,6 +1468,7 @@ def dashboard():
             .status.partially_completed, .status.retrying, .status.saturated { background:#fef3c7; color:#b45309; }
             .status.assigned { background:#e0f2fe; color:#0369a1; }
             .status.cancelled { background:#e2e8f0; color:#64748b; }
+            #cases-table td:first-child, #workers-table td:first-child { white-space:nowrap; }
             .breakdown { display:block; font-size:0.78em; color:var(--muted); margin-top:3px; }
             .pool { display:inline-block; background:var(--soft); color:var(--primary-dark); border-radius:999px; padding:1px 8px; font-size:0.78em; margin:1px 2px 1px 0; }
             .queues { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin-bottom:8px; }
@@ -1442,6 +1513,27 @@ def dashboard():
                 --w-other:#7c8b93; --queue:#94a3b8; --link:#b6dfe8;
                 --critical:#d03b3b; --grid:#e3f4f8;
             }
+            /* Variedad de archivos: un color fijo por tipo */
+            :root { --t-video:#2a78d6; --t-audio:#eb6834; --t-image:#1baf7a; --t-other:#94a3b8; }
+            .variety-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:14px; margin-top:14px; }
+            .chart { background:#fff; border:1px solid var(--soft); border-radius:10px; padding:12px 14px 14px; }
+            .chart h3 { color:var(--primary-dark); font-size:0.92em; margin:0; }
+            .chart .hint { color:var(--muted); font-size:0.78em; margin:2px 0 10px; }
+            .hbar-row { display:grid; grid-template-columns:96px 1fr auto; align-items:center; gap:8px; font-size:0.8em; margin:6px 0; }
+            .hbar-row .name { color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+            .hbar-track { height:12px; }
+            .hbar { height:100%; border-radius:0 4px 4px 0; min-width:3px; }
+            .hbar-val { color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; }
+            .cols { display:flex; align-items:flex-end; gap:10px; height:150px; border-bottom:1px solid #a5d8e3; }
+            .col { flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; }
+            .col .total { text-align:center; font-size:0.76em; color:var(--text); margin-bottom:3px; font-variant-numeric:tabular-nums; }
+            .col .stack { display:flex; flex-direction:column-reverse; gap:2px; }
+            .col .stack .seg:last-child { border-radius:4px 4px 0 0; }
+            .col-labels { display:flex; gap:10px; margin-top:5px; }
+            .col-labels div { flex:1; text-align:center; font-size:0.7em; color:var(--muted); line-height:1.25; }
+            .variety details { margin-top:12px; font-size:0.85em; }
+            .variety summary { cursor:pointer; color:var(--primary-dark); }
+            .variety details table { margin-top:8px; }
             .trace h3 { color:var(--primary-dark); font-size:0.95em; margin:18px 0 2px; }
             .trace .hint { color:var(--muted); font-size:0.82em; margin-bottom:8px; }
             .trace-head { display:flex; flex-wrap:wrap; gap:12px 24px; align-items:center; justify-content:space-between; }
@@ -1514,6 +1606,39 @@ def dashboard():
             <thead><tr><th>ID</th><th>Nombre</th><th>Estado</th><th>Progreso</th><th>Prioridad</th><th>Creado</th><th></th></tr></thead>
             <tbody></tbody>
         </table>
+        </div>
+
+        <h2>Variedad de archivos recibidos</h2>
+        <div class="card variety">
+            <div class="trace-head">
+                <p class="hint" style="margin:0">Tipos, formatos y tamaños de todos los archivos enviados al sistema.</p>
+                <div class="legend" id="variety-legend"></div>
+            </div>
+            <div class="kpis" id="variety-kpis"></div>
+            <div class="variety-grid">
+                <div class="chart">
+                    <h3>Archivos por tipo</h3>
+                    <p class="hint">Cantidad y volumen total</p>
+                    <div id="chart-types"></div>
+                </div>
+                <div class="chart">
+                    <h3>Formatos</h3>
+                    <p class="hint">Cantidad de archivos por extensión</p>
+                    <div id="chart-formats"></div>
+                </div>
+                <div class="chart">
+                    <h3>Distribución de tamaños</h3>
+                    <p class="hint">Archivos por rango de tamaño, según tipo</p>
+                    <div id="chart-sizes"></div>
+                </div>
+            </div>
+            <details>
+                <summary>Ver datos en tabla</summary>
+                <div class="table-wrap"><table id="variety-table">
+                    <thead><tr><th>Formato</th><th>Tipo</th><th>Archivos</th><th>Volumen</th></tr></thead>
+                    <tbody></tbody>
+                </table></div>
+            </details>
         </div>
 
         <h2>Trazabilidad: qué worker procesó cada archivo</h2>
@@ -1661,7 +1786,7 @@ def dashboard():
                     <div class="card queue">
                         <div class="label">Pool <b>${pool}</b> · ${POOL_DESC[pool] || ''}</div>
                         <div class="value">${d.waiting}<span class="of"> en espera</span></div>
-                        <div class="sub">${d.consumers} worker(s) atendiendo${d.waiting && !d.consumers ? ' · ⚠ nadie atiende este pool' : ''}</div>
+                        <div class="sub">${d.consumers} worker(s) atendiendo${d.waiting && !d.consumers ? ' · <span style="color:var(--critical)">nadie atiende este pool</span>' : ''}</div>
                         <div class="bar"><div style="width:${Math.min(100, d.waiting * 2)}%"></div></div>
                     </div>`).join('');
 
@@ -1682,8 +1807,8 @@ def dashboard():
                         <td>${off ? '-' : w.active_tasks}</td>
                         <td>${w.processed}</td>
                         <td>${off || w.outdated == null ? '-' : w.outdated
-                            ? `<span class="status failed" title="Este worker corre código viejo: reinicialo o reconstruí su imagen Docker">⚠ desactualizado</span>`
-                            : `<span class="status completed">✓ v${w.version}</span>`}</td>
+                            ? `<span class="status failed" title="Este worker corre código viejo: reinicialo o reconstruí su imagen Docker">desactualizado</span>`
+                            : `<span class="status completed">v${w.version}</span>`}</td>
                         <td>${off ? `<button class="btn-del" title="Quitar de la lista" onclick="deleteWorker(this, '${esc(w.worker_id)}')">Quitar</button>` : ''}</td>
                     </tr>`;
                 }).join('');
@@ -1700,8 +1825,8 @@ def dashboard():
                         <td>${c.case_name}</td>
                         <td><span class="status ${c.status}">${CASE_STATUS[c.status] || c.status}</span></td>
                         <td><div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div> ${pct}%
-                            <span class="breakdown" title="en espera · en ejecución · completadas · fallidas">
-                                ⏳ ${c.n_waiting} · ⚙ ${c.n_running} · ✓ ${c.n_completed} · ✗ ${c.n_failed}${c.n_cancelled ? ` · ⊘ ${c.n_cancelled}` : ''}</span></td>
+                            <span class="breakdown" >
+                                ${caseBreakdown(c)}</span></td>
                         <td>${c.priority}</td>
                         <td>${c.created_at ? new Date(c.created_at).toLocaleString() : ''}</td>
                         <td style="white-space:nowrap">${['queued', 'processing', 'retrying'].includes(c.status)
@@ -1723,10 +1848,18 @@ def dashboard():
                 }
 
                 if (detailCaseId && casesById[detailCaseId]) renderCaseDetail(detailCaseId);
+                refreshVariety();
                 await refreshTrace();
             }
 
             let casesById = {};
+
+            function caseBreakdown(c) {
+                return [[c.n_waiting, 'en espera', 'en espera'], [c.n_running, 'en ejecución', 'en ejecución'],
+                        [c.n_completed, 'completada', 'completadas'], [c.n_failed, 'fallida', 'fallidas'],
+                        [c.n_cancelled, 'cancelada', 'canceladas']]
+                    .filter(([n]) => n > 0).map(([n, s, p]) => `${n} ${n === 1 ? s : p}`).join(' · ');
+            }
 
             const WORKER_STATUS = { idle: 'libre', busy: 'ocupado', offline: 'desconectado', saturated: 'saturado' };
             const CASE_STATUS = {
@@ -1811,8 +1944,8 @@ def dashboard():
                         <td>${s.pool ? `<span class="pool">${s.pool}</span>` : '-'}</td>
                         <td><span class="status ${s.status}">${STATUS_LABEL[s.status] || s.status}${
                             ['assigned', 'processing'].includes(s.status) && s.progress > 0 ? ` ${Math.round(s.progress)}%` : ''}</span>${
-                            s.retries ? ` <small title="Reintentos por errores transitorios">⟳${s.retries}</small>` : ''}${
-                            s.reassignments ? ` <small title="Veces que pasó a otro worker">↻${s.reassignments}</small>` : ''}</td>
+                            s.retries ? ` <small title="Reintentos por errores transitorios">${s.retries} reintento(s)</small>` : ''}${
+                            s.reassignments ? ` <small title="Veces que pasó a otro worker porque el anterior se cayó">redistribuida</small>` : ''}</td>
                         <td>${s.assigned_worker || '-'}</td>
                         <td>${s.started_at && s.finished_at ? fmtDur(Date.parse(s.finished_at) - Date.parse(s.started_at)) : '-'}</td>
                         <td>${s.status === 'completed' && s.result_path
@@ -1822,6 +1955,114 @@ def dashboard():
                 `).join('');
             }
 
+            // ===== Variedad de archivos =====
+            const TYPE_INFO = {
+                video:   { label: 'Video',  color: 'var(--t-video)' },
+                audio:   { label: 'Audio',  color: 'var(--t-audio)' },
+                image:   { label: 'Imagen', color: 'var(--t-image)' },
+                unknown: { label: 'Otro',   color: 'var(--t-other)' }
+            };
+            const TYPE_ORDER = ['video', 'audio', 'image', 'unknown'];
+            const typeInfo = t => TYPE_INFO[t] || { label: t, color: 'var(--t-other)' };
+            const attr = s => esc(s).replace(/"/g, '&quot;');
+
+            function fmtBytes(b) {
+                if (b == null) return '-';
+                const u = ['B', 'KB', 'MB', 'GB'];
+                let i = 0;
+                while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+                return (i === 0 ? b : b.toFixed(b < 10 ? 1 : 0)) + ' ' + u[i];
+            }
+            const plural = (n, s, p) => `${n} ${n === 1 ? s : p}`;
+
+            let varietyKey = '';
+            async function refreshVariety() {
+                const d = await (await fetch('/api/dataset')).json();
+                const key = JSON.stringify(d);
+                if (key === varietyKey) return;
+                varietyKey = key;
+                renderVariety(d);
+            }
+
+            function renderVariety(d) {
+                const types = TYPE_ORDER.filter(t => d.by_type[t]).concat(
+                    Object.keys(d.by_type).filter(t => !TYPE_ORDER.includes(t)));
+
+                document.getElementById('variety-legend').innerHTML = types.map(t =>
+                    `<span><i style="background:${typeInfo(t).color}"></i>${typeInfo(t).label}</span>`).join('');
+
+                if (!d.files) {
+                    document.getElementById('variety-kpis').innerHTML = '';
+                    ['chart-types', 'chart-formats', 'chart-sizes'].forEach(id =>
+                        document.getElementById(id).innerHTML = '<div class="empty">Todavía no hay archivos.</div>');
+                    document.querySelector('#variety-table tbody').innerHTML = '';
+                    return;
+                }
+
+                document.getElementById('variety-kpis').innerHTML = [
+                    ['Archivos', d.files],
+                    ['Volumen total', fmtBytes(d.bytes)],
+                    ['Formatos distintos', d.by_format.length],
+                    ['Tamaño mínimo', fmtBytes(d.min)],
+                    ['Tamaño mediano', fmtBytes(d.median)],
+                    ['Tamaño máximo', fmtBytes(d.max)]
+                ].map(([l, v]) => `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('');
+
+                // Archivos por tipo (barras horizontales)
+                const maxType = Math.max(...types.map(t => d.by_type[t].count));
+                document.getElementById('chart-types').innerHTML = types.map(t => {
+                    const v = d.by_type[t], info = typeInfo(t);
+                    const tip = `<b>${info.label}</b><br>${plural(v.count, 'archivo', 'archivos')} · ${fmtBytes(v.bytes)}<br>${Math.round(v.count / d.files * 100)}% del total`;
+                    return `<div class="hbar-row" data-tip="${attr(tip)}">
+                        <span class="name">${info.label}</span>
+                        <div class="hbar-track"><div class="hbar" style="width:${v.count / maxType * 100}%;background:${info.color}"></div></div>
+                        <span class="hbar-val">${v.count} · ${fmtBytes(v.bytes)}</span></div>`;
+                }).join('');
+
+                // Formatos (barras horizontales, color por tipo)
+                const formats = d.by_format.slice().sort((a, b) =>
+                    TYPE_ORDER.indexOf(a.file_type) - TYPE_ORDER.indexOf(b.file_type) || b.count - a.count);
+                const maxFmt = Math.max(...formats.map(f => f.count));
+                document.getElementById('chart-formats').innerHTML = formats.map(f => {
+                    const info = typeInfo(f.file_type);
+                    const tip = `<b>.${esc(f.format)}</b> (${info.label})<br>${plural(f.count, 'archivo', 'archivos')} · ${fmtBytes(f.bytes)}`;
+                    return `<div class="hbar-row" data-tip="${attr(tip)}">
+                        <span class="name">${esc(f.format.toUpperCase())}</span>
+                        <div class="hbar-track"><div class="hbar" style="width:${f.count / maxFmt * 100}%;background:${info.color}"></div></div>
+                        <span class="hbar-val">${f.count}</span></div>`;
+                }).join('');
+
+                // Distribución de tamaños (columnas apiladas por tipo)
+                const totals = d.size_buckets.map(b => Object.values(b.by_type).reduce((a, c) => a + c, 0));
+                const maxBucket = Math.max(1, ...totals);
+                const plotH = 120;
+                const sinMedir = d.files - d.measured;
+                document.getElementById('chart-sizes').innerHTML =
+                    (sinMedir ? `<p class="hint">${plural(sinMedir, 'archivo no tiene', 'archivos no tienen')} tamaño registrado.</p>` : '') +
+                    `<div class="cols">` + d.size_buckets.map((b, i) => {
+                        const segs = types.filter(t => b.by_type[t]).map(t => {
+                            const n = b.by_type[t], info = typeInfo(t);
+                            const tip = `<b>${b.label}</b><br>${info.label}: ${plural(n, 'archivo', 'archivos')}`;
+                            return `<div class="seg" data-tip="${attr(tip)}" style="height:${Math.max(2, n / maxBucket * plotH)}px;background:${info.color}"></div>`;
+                        }).join('');
+                        return `<div class="col"><div class="total">${totals[i] || ''}</div><div class="stack">${segs}</div></div>`;
+                    }).join('') + `</div>` +
+                    `<div class="col-labels">${d.size_buckets.map(b => `<div>${b.label}</div>`).join('')}</div>`;
+
+                // Tabla
+                document.querySelector('#variety-table tbody').innerHTML = formats.map(f => `
+                    <tr><td>${esc(f.format.toUpperCase())}</td><td>${typeInfo(f.file_type).label}</td>
+                        <td>${f.count}</td><td>${fmtBytes(f.bytes)}</td></tr>`).join('');
+            }
+
+            // Tooltips de los gráficos de variedad
+            const varietyEl = document.querySelector('.variety');
+            varietyEl.addEventListener('mousemove', ev => {
+                const el = ev.target.closest('[data-tip]');
+                if (el) showTip(el.dataset.tip, ev); else hideTip();
+            });
+            varietyEl.addEventListener('mouseleave', hideTip);
+
             // ===== Trazabilidad =====
             const NS = 'http://www.w3.org/2000/svg';
             const OP_LABEL = {
@@ -1830,7 +2071,6 @@ def dashboard():
                 unsupported: 'No soportado'
             };
             OP_LABEL.generate_thumbnail_video = 'Portada';
-            const STATUS_ICON = { completed: '✓', failed: '✗', processing: '⚙', assigned: '→', pending: '…', retrying: '⟳', cancelled: '⊘' };
             const STATUS_LABEL = { completed: 'completada', failed: 'fallida', processing: 'en proceso', assigned: 'asignada',
                                    pending: 'en cola', retrying: 'reintentando', cancelled: 'cancelada' };
             const QUEUE = '__cola__';
@@ -1879,7 +2119,7 @@ def dashboard():
                 const st = s.started_at ? Date.parse(s.started_at) : null;
                 const en = s.finished_at ? Date.parse(s.finished_at) : (s.status === 'processing' ? now : null);
                 return `<b>${esc(s.file_name)}</b><br>${esc(opText(s))}<br>` +
-                       `Estado: ${STATUS_ICON[s.status] || ''} ${STATUS_LABEL[s.status] || esc(s.status)}<br>` +
+                       `Estado: ${STATUS_LABEL[s.status] || esc(s.status)}<br>` +
                        `Worker: ${s.assigned_worker ? `<i style="background:${colorFor(s.assigned_worker)}"></i>${esc(s.assigned_worker)}` : 'esperando en la cola'}` +
                        (st && en ? `<br>Duración: ${fmtDur(en - st)}` : '') +
                        (s.error_message ? `<br>Error: ${esc(trunc(s.error_message, 120))}` : '');
@@ -2033,7 +2273,7 @@ def dashboard():
                             if (!s.assigned_worker) Object.assign(attrs, { 'stroke-dasharray': '4 4' });
                             if (s.status === 'processing' || s.status === 'assigned') attrs.class = 'live';
                             link(colX[2] + colW[2], s._y, colX[3], wY[w], attrs, one);
-                            node(colX[2], s._y, colW[2], nodeH, `${STATUS_ICON[s.status] || ''} ${opText(s)}`, {
+                            node(colX[2], s._y, colW[2], nodeH, opText(s) + (s.status === 'completed' ? '' : ` (${STATUS_LABEL[s.status] || s.status})`), {
                                 set: one, tip: taskTip(s, Date.parse(data.now)),
                                 stroke: s.status === 'failed' ? 'var(--critical)' : undefined,
                                 strokeW: s.status === 'failed' ? 1.5 : 1
@@ -2146,7 +2386,7 @@ def dashboard():
                         });
                         if (t.s.status === 'processing') r.setAttribute('class', 'pulse');
                         svg.appendChild(r);
-                        const label = (failed ? '✗ ' : '') + t.s.file_name;
+                        const label = t.s.file_name + (failed ? ' (fallida)' : '');
                         const chars = Math.floor((bw - 10) / 6.4);
                         if (chars >= 5) svg.appendChild(el('text', {
                             x: x + 6, y: ly + laneH / 2 + 4, 'font-size': 11,
