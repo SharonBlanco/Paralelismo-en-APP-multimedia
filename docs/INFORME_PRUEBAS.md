@@ -7,12 +7,13 @@ Este documento define las pruebas que evidencian lo que pide el enunciado: **car
 ## 0. Preparación
 
 1. Levantar el coordinador y los tres workers, cada uno en su PC (ver README).
-2. Verificar en el dashboard que los tres workers aparezcan **libres** y con **v3**, y que cada pool tenga al menos un worker.
+2. Verificar en el dashboard que los tres workers aparezcan **libres** y con **v4**, y que cada pool tenga al menos un worker.
 3. Generar el dataset en la máquina que hará de cliente:
    ```bash
-   python scripts/generar_dataset.py
+   python scripts/descargar_dataset.py      # archivos reales; o generar_dataset.py sin internet
    ```
-4. Anotar la composición del dataset (`dataset_prueba/composicion.json`). Después de enviar la carga, la sección **Variedad de archivos recibidos** del dashboard muestra lo mismo en gráficos: tomar una captura como evidencia de la diversidad de tipos, formatos y tamaños.
+   En los comandos de abajo, usar `./dataset_real` en lugar de `./dataset_prueba` si se usó el dataset real.
+4. Anotar la composición del dataset (`composicion.json` dentro de la carpeta del dataset; con el dataset real, citar también `CREDITOS.md`). Después de enviar la carga, la sección **Variedad de archivos recibidos** del dashboard muestra lo mismo en gráficos: tomar una captura como evidencia de la diversidad de tipos, formatos y tamaños.
 
 | Dato | Valor |
 |---|---|
@@ -205,6 +206,29 @@ python cliente/cliente.py auto ./dataset_prueba --por evento --concurrentes 3 --
 | Criterio | Casos creados | Archivos | Tiempo total (s) |
 |---|---|---|---|
 | evento | | | |
+
+---
+
+## P11. Archivos pesados (400–600 MB)
+
+**Objetivo:** el escenario que pidió el profesor. Un lote chico con un archivo enorme no debe trabar el sistema, y las demás cargas tienen que seguir avanzando.
+
+```bash
+# 1. el lote del ejemplo de clase: 4 canciones + 1 video de ~500 MB
+python cliente/cliente.py enviar ./dataset_real/caso_035_lote_con_archivo_pesado
+# 2. mientras se procesa, enviar más carga
+python cliente/cliente.py carga ./dataset_real --max-casos 5 --concurrentes 3
+```
+
+(El número del caso puede variar: es el que termina en `_lote_con_archivo_pesado`.)
+
+**Evidencia:** tiempo de subida del lote, avance (%) de la conversión del video grande, que los otros workers sigan tomando las sub-tareas chicas mientras tanto (línea de tiempo), y uso de CPU y RAM del worker que procesa el archivo grande.
+
+| Archivo | Tamaño | Subida (s) | Descarga al worker (s) | Conversión (min) | Worker | Resultado (MB) |
+|---|---|---|---|---|---|---|
+| | | | | | | |
+
+**Análisis:** ¿dónde está el cuello de botella con archivos grandes (red, disco o CPU)? ¿Se bloquearon otras cargas mientras tanto?
 
 ---
 

@@ -41,28 +41,50 @@ IGNORAR = {"metadata.json", "catalogo.json", "composicion.json"}
 # ============================================================
 # ENVÍO DE CASOS
 # ============================================================
+def _multipart(campos: dict, archivos, boundary: str):
+    """
+    Arma el cuerpo multipart/form-data como un flujo: los archivos se leen
+    de a 1 MB mientras se envían, así un lote con archivos de cientos de MB
+    no se carga entero en memoria.
+    """
+    for nombre, valor in campos.items():
+        yield (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{nombre}\"\r\n\r\n"
+               f"{valor}\r\n").encode()
+    for f in archivos:
+        nombre_archivo = f.name.replace('"', "'")
+        yield (f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; "
+               f"filename=\"{nombre_archivo}\"\r\nContent-Type: application/octet-stream\r\n\r\n").encode()
+        with open(f, "rb") as fp:
+            while chunk := fp.read(1024 * 1024):
+                yield chunk
+        yield b"\r\n"
+    yield f"--{boundary}--\r\n".encode()
+
+
 def enviar_archivos(archivos, nombre, prioridad=5, metadata=None):
     """Envía una lista de archivos como un caso. Devuelve la respuesta del coordinador."""
-    files = [("files", (f.name, open(f, "rb"))) for f in archivos]
-    data = {"case_name": nombre, "priority": str(prioridad)}
+    campos = {"case_name": nombre, "priority": str(prioridad)}
     if metadata:
-        data["metadata"] = json.dumps(metadata, ensure_ascii=False)
+        campos["metadata"] = json.dumps(metadata, ensure_ascii=False)
+    boundary = f"----caso{random.getrandbits(64):016x}"
+    total_mb = sum(f.stat().st_size for f in archivos) / 2 ** 20
     try:
         t0 = time.time()
-        resp = requests.post(f"{COORDINATOR_URL}/api/cases", files=files, data=data, timeout=600)
+        resp = requests.post(
+            f"{COORDINATOR_URL}/api/cases",
+            data=_multipart(campos, archivos, boundary),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            timeout=(10, 1800))
         resp.raise_for_status()
         result = resp.json()
         result["upload_seconds"] = round(time.time() - t0, 2)
-        print(f"[✓] {nombre}: {result['case_id']} | {len(archivos)} archivos → "
+        print(f"[✓] {nombre}: {result['case_id']} | {len(archivos)} archivos ({total_mb:.0f} MB) → "
               f"{result['total_subtasks']} sub-tareas | prioridad {prioridad} | "
               f"subida {result['upload_seconds']} s")
         return result
     except Exception as e:
         print(f"[✗] {nombre}: {e}")
         return None
-    finally:
-        for _, (_, fp) in files:
-            fp.close()
 
 
 def leer_metadata(carpeta: Path):

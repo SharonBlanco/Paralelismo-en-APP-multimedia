@@ -18,6 +18,8 @@ Uso:
 import os
 import json
 import shutil
+import socket
+import subprocess
 import uuid
 import threading
 import time
@@ -28,7 +30,9 @@ from pathlib import Path
 
 import pika
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, Json
+import urllib.request
+import base64
 from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -50,7 +54,7 @@ PG_PASS = os.getenv("PG_PASS", "admin123")
 
 # Versión de worker esperada (debe coincidir con WORKER_VERSION en worker.py).
 # Los workers viejos no la envían y se marcan como desactualizados.
-WORKER_VERSION = 3
+WORKER_VERSION = 4
 worker_versions = {}  # worker_id -> versión reportada en el último heartbeat
 
 # Un worker manda heartbeat cada ~6 s; sin noticias en este tiempo → desconectado
@@ -137,6 +141,60 @@ def publish_subtask(channel, st: dict, priority: int):
     )
 
 
+def coordinator_info() -> dict:
+    """Nombre e IPs de la máquina del coordinador (para distinguir workers locales)"""
+    ips = set()
+    try:
+        ips.update(subprocess.run(["hostname", "-I"], capture_output=True, text=True,
+                                  timeout=5).stdout.split())
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sk:
+            sk.connect(("8.8.8.8", 80))                     # no envía nada: solo elige la interfaz
+            principal = sk.getsockname()[0]
+            ips.add(principal)
+    except OSError:
+        principal = next(iter(ips), "127.0.0.1")
+    return {"hostname": socket.gethostname(), "ip": principal,
+            "ips": sorted(i for i in ips if ":" not in i and not i.startswith("172.17."))}
+
+
+COORDINATOR = coordinator_info()
+
+
+def is_local(ip: str) -> bool:
+    """¿La conexión viene de la misma máquina que el coordinador?"""
+    return ip.startswith("127.") or ip == "::1" or ip in COORDINATOR["ips"]
+
+
+def ensure_long_task_policy():
+    """
+    RabbitMQ cancela a un consumidor que tarda más de 30 min en confirmar
+    un mensaje (consumer_timeout) y re-entrega la tarea: con videos de una
+    hora, la sub-tarea rebotaría para siempre. Se define una política que
+    sube ese límite a 4 h para las colas de trabajo (API de administración).
+    """
+    nombre = f"{QUEUE_PREFIX or 'default'}-tareas-largas"
+    cuerpo = json.dumps({
+        "pattern": "^" + QUEUE_PREFIX.replace(".", "\\.") + "tareas\\.",
+        "definition": {"consumer-timeout": 4 * 3600 * 1000},
+        "apply-to": "queues",
+        "priority": 1,
+    }).encode()
+    req = urllib.request.Request(
+        f"http://{RABBIT_HOST}:{os.getenv('RABBIT_MGMT_PORT', '15672')}/api/policies/%2F/{nombre}",
+        data=cuerpo, method="PUT", headers={"Content-Type": "application/json"})
+    token = base64.b64encode(f"{RABBIT_USER}:{RABBIT_PASS}".encode()).decode()
+    req.add_header("Authorization", f"Basic {token}")
+    try:
+        urllib.request.urlopen(req, timeout=5)
+        print("[*] Política de RabbitMQ: tareas de hasta 4 h sin re-entrega")
+    except Exception as e:
+        print(f"[!] No se pudo configurar el límite de tiempo de RabbitMQ ({e}). "
+              "Las sub-tareas de más de 30 min podrían re-entregarse.")
+
+
 def ensure_schema():
     """
     Agrega a la BD las columnas nuevas si no existen (para no tener que
@@ -151,8 +209,10 @@ def ensure_schema():
         ALTER TABLE subtasks ADD COLUMN IF NOT EXISTS reassignments INT DEFAULT 0;
         ALTER TABLE subtasks ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMP;
         ALTER TABLE subtasks ADD COLUMN IF NOT EXISTS file_size BIGINT;
+        ALTER TABLE subtasks ADD COLUMN IF NOT EXISTS result_info JSONB;
         ALTER TABLE workers  ADD COLUMN IF NOT EXISTS pools VARCHAR(100);
         ALTER TABLE workers  ADD COLUMN IF NOT EXISTS concurrency INT DEFAULT 1;
+        ALTER TABLE workers  ADD COLUMN IF NOT EXISTS machine JSONB;
     """)
     db.commit()
     cur.close()
@@ -452,9 +512,10 @@ def handle_worker_message(cur, msg: dict):
         UPDATE subtasks
         SET status=%s, error_message=%s, result_path=%s, assigned_worker=%s,
             finished_at=NOW(), progress=CASE WHEN %s='completed' THEN 100 ELSE progress END,
-            started_at=COALESCE(started_at, NOW())
+            started_at=COALESCE(started_at, NOW()), result_info=%s
         WHERE subtask_id=%s
-    """, (status, error_msg, msg.get("result_path") or None, worker_id, status, subtask_id))
+    """, (status, error_msg, msg.get("result_path") or None, worker_id, status,
+          Json(msg["info"]) if msg.get("info") else None, subtask_id))
     print(f"  [✓] Resultado: {subtask_id} → {status} (worker: {worker_id})")
 
     final_status = refresh_case_status(cur, st["case_id"])
@@ -638,6 +699,7 @@ def list_workers():
             if isinstance(v, datetime):
                 w[k] = to_local(v).isoformat()
         w["seconds_since"] = float(w["seconds_since"] or 0)
+        w["same_machine"] = is_local(w["host_address"] or "")
         w["version"] = worker_versions.get(w["worker_id"])
         # None = todavía no mandó heartbeat desde que arrancó el coordinador
         w["outdated"] = (w["version"] != WORKER_VERSION
@@ -656,14 +718,20 @@ async def worker_heartbeat(request: Request):
     db = get_db()
     cur = db.cursor()
 
+    # IP desde la que llega la conexión: la ve el coordinador, no la informa
+    # el worker. Es la prueba de que el worker está en otra máquina.
+    ip_real = request.client.host if request.client else data.get("host_address")
+    machine = data.get("machine") or {}
+    machine["ip_informada"] = data.get("host_address")
+
     # saturated: el worker pausó el consumo porque su CPU está al límite
     status = ("saturated" if data.get("saturated") else
               "busy" if data["active_tasks"] > 0 else "idle")
     pools = ",".join(data.get("pools") or POOLS)
     cur.execute("""
         INSERT INTO workers (worker_id, host_address, cpu_usage, memory_usage,
-                             active_tasks, last_heartbeat, status, pools, concurrency)
-        VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s, %s)
+                             active_tasks, last_heartbeat, status, pools, concurrency, machine)
+        VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s, %s, %s)
         ON CONFLICT (worker_id) DO UPDATE SET
             host_address = EXCLUDED.host_address,
             cpu_usage = EXCLUDED.cpu_usage,
@@ -672,11 +740,12 @@ async def worker_heartbeat(request: Request):
             last_heartbeat = NOW(),
             status = EXCLUDED.status,
             pools = EXCLUDED.pools,
-            concurrency = EXCLUDED.concurrency
+            concurrency = EXCLUDED.concurrency,
+            machine = EXCLUDED.machine
     """, (
-        data["worker_id"], data["host_address"],
+        data["worker_id"], ip_real,
         data["cpu_usage"], data["memory_usage"],
-        data["active_tasks"], status, pools, data.get("concurrency", 1)
+        data["active_tasks"], status, pools, data.get("concurrency", 1), Json(machine)
     ))
 
     # Log de recursos
@@ -791,6 +860,30 @@ async def upload_result(subtask_id: str, file: UploadFile = File(...)):
     return {"result_path": str(dest)}
 
 
+@app.post("/api/results/{subtask_id}/raw")
+async def upload_result_raw(subtask_id: str, request: Request, filename: str):
+    """
+    El worker sube el resultado como flujo de bytes (sin multipart), para
+    no tener que cargar en memoria archivos de cientos de MB.
+    """
+    db = get_db()
+    cur = db.cursor()
+    cur.execute("SELECT case_id FROM subtasks WHERE subtask_id=%s", (subtask_id,))
+    row = cur.fetchone()
+    cur.close()
+    db.close()
+    if not row:
+        return JSONResponse({"error": "Sub-tarea no encontrada"}, 404)
+
+    dest_dir = RESULTS_DIR / row["case_id"]
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / Path(filename).name
+    with open(dest, "wb") as fp:
+        async for chunk in request.stream():
+            fp.write(chunk)
+    return {"result_path": str(dest)}
+
+
 @app.get("/api/results/{subtask_id}")
 def download_result(subtask_id: str):
     """Descargar el resultado de una sub-tarea desde el dashboard"""
@@ -896,6 +989,7 @@ def build_report(case_id: str):
             "worker": s["assigned_worker"],
             "retries": s.get("retries") or 0,
             "reassignments": s.get("reassignments") or 0,
+            "info": s.get("result_info"),
             "started_at": iso(s["started_at"]),
             "finished_at": iso(s["finished_at"]),
             "duration_seconds": _seconds(s["started_at"], s["finished_at"]),
@@ -1049,6 +1143,31 @@ def _fmt_dur(sec):
     return f"{m} min {r:02d} s"
 
 
+def _info_text(s: dict, file_type: str) -> str:
+    """Resumen legible de lo que informó el worker sobre su resultado"""
+    info = s.get("info")
+    if not isinstance(info, dict):
+        return ""
+    op = s["operation"]
+    if op == "generate_thumbnail" and "segundo" in info:
+        m, sec = divmod(int(info["segundo"]), 60)
+        return f"Portada tomada en {m}:{sec:02d} (la mejor de {info.get('candidatos', '?')} candidatas)"
+    if op == "extract_metadata":
+        if not info.get("fuente"):
+            return "Sin coincidencia en servicios externos (solo metadatos técnicos)"
+        partes = []
+        if info.get("album"):
+            partes.append(f"Álbum: {info['album']}" + (f" ({info['fecha'][:4]})" if info.get("fecha") else ""))
+        if info.get("genero"):
+            partes.append(f"Género: {info['genero']}")
+        partes.append(f"Versión: {info.get('version', 'original')}")
+        partes.append("Letra: sí" if info.get("letra") else "Letra: no encontrada")
+        return " · ".join(partes) + f" · Fuente: {info['fuente']}"
+    if op == "convert_format" and "entrada_mb" in info:
+        return f"{info['entrada_mb']} MB → {info['salida_mb']} MB"
+    return ""
+
+
 def _meta_html(meta):
     """Metadatos asociados a un archivo, en una línea pequeña bajo su nombre"""
     if not isinstance(meta, dict):
@@ -1116,6 +1235,9 @@ def report_page(case_id: str):
                 extras.append(f'{s["retries"]} reintento(s)')
             if s["reassignments"]:
                 extras.append(f'redistribuida {s["reassignments"]} vez/veces')
+            info_txt = _info_text(s, f["file_type"])
+            if info_txt:
+                extras.insert(0, info_txt)
             if extras:
                 detail += f'<br><small class="muted">{e(" · ".join(extras))}</small>'
             rows.append(
@@ -1398,6 +1520,7 @@ def get_stats():
         "files": files,
         "active_workers": active_workers,
         "queues": queue_stats(),
+        "coordinator": COORDINATOR,
     }
 
 
@@ -1593,9 +1716,10 @@ def dashboard():
         </form>
 
         <h2>Workers activos</h2>
+        <p class="hint" id="nodes-summary" style="margin:-4px 0 8px"></p>
         <div class="table-wrap">
         <table id="workers-table">
-            <thead><tr><th>ID</th><th>Host</th><th>Estado</th><th>Pools</th><th>CPU</th><th>Memoria</th><th>Tareas</th><th>Procesadas</th><th>Versión</th><th></th></tr></thead>
+            <thead><tr><th>ID</th><th>IP (vista por el coordinador)</th><th>Máquina</th><th>Estado</th><th>Pools</th><th>CPU</th><th>Memoria</th><th>Tareas</th><th>Procesadas</th><th>Versión</th><th></th></tr></thead>
             <tbody></tbody>
         </table>
         </div>
@@ -1792,12 +1916,14 @@ def dashboard():
 
                 // Workers
                 const workers = await (await fetch('/api/workers')).json();
+                nodesSummary(workers, stats.coordinator);
                 document.querySelector('#workers-table tbody').innerHTML = workers.map(w => {
                     const off = w.status === 'offline';
                     return `
                     <tr class="${off ? 'offline-row' : ''}">
                         <td>${w.worker_id}</td>
-                        <td>${w.host_address}</td>
+                        <td>${esc(w.host_address)}${w.same_machine ? '<br><small style="color:var(--muted)">misma máquina que el coordinador</small>' : ''}</td>
+                        <td>${machineCell(w.machine)}</td>
                         <td><span class="status ${w.status}" title="${w.status === 'saturated' ? 'CPU al límite: no toma sub-tareas nuevas hasta que baje' : ''}">${WORKER_STATUS[w.status] || w.status}</span>
                             ${off ? `<small>hace ${fmtAgo(w.seconds_since)}</small>` : ''}</td>
                         <td>${(w.pools || 'video,audio,ligera').split(',').map(p => `<span class="pool">${p}</span>`).join('')}
@@ -1853,6 +1979,38 @@ def dashboard():
             }
 
             let casesById = {};
+
+            function infoText(s) {
+                const i = s.result_info;
+                if (!i) return '';
+                if (s.operation === 'generate_thumbnail' && i.segundo != null) {
+                    const m = Math.floor(i.segundo / 60), sec = String(Math.floor(i.segundo % 60)).padStart(2, '0');
+                    return `Portada en ${m}:${sec} (mejor de ${i.candidatos})`;
+                }
+                if (s.operation === 'extract_metadata') {
+                    if (!i.fuente) return 'Sin coincidencia externa';
+                    return [i.album ? `${i.album}${i.fecha ? ' (' + i.fecha.slice(0, 4) + ')' : ''}` : null,
+                            i.genero, i.letra ? 'con letra' : null, i.fuente].filter(Boolean).join(' · ');
+                }
+                if (s.operation === 'convert_format' && i.entrada_mb != null) return `${i.entrada_mb} MB → ${i.salida_mb} MB`;
+                return '';
+            }
+
+            function machineCell(m) {
+                if (!m || !m.cpu) return '<small style="color:var(--muted)">sin datos (worker viejo)</small>';
+                const nombre = m.docker && /^[0-9a-f]{12}$/.test(m.hostname) ? `contenedor ${m.hostname.slice(0, 6)}` : m.hostname;
+                return `<b title="${attr(nombre)}" style="white-space:nowrap">${esc(trunc(nombre, 24))}</b><br><small style="color:var(--muted)">${esc(m.cpu)}<br>${m.nucleos} núcleos · ${m.ram_gb} GB · ${esc(m.so)}</small>`;
+            }
+
+            function nodesSummary(workers, coord) {
+                const activos = workers.filter(w => w.status !== 'offline');
+                const maquinas = new Set(activos.map(w => w.same_machine ? 'coordinador' : w.host_address));
+                const remotos = activos.filter(w => !w.same_machine).length;
+                document.getElementById('nodes-summary').innerHTML =
+                    `<b>${plural(activos.length, 'worker conectado', 'workers conectados')} en ${plural(maquinas.size, 'máquina distinta', 'máquinas distintas')}</b>` +
+                    ` (${remotos} en otras computadoras)` +
+                    (coord ? ` · Coordinador: ${esc(coord.hostname)} (${esc(coord.ip)})` : '');
+            }
 
             function caseBreakdown(c) {
                 return [[c.n_waiting, 'en espera', 'en espera'], [c.n_running, 'en ejecución', 'en ejecución'],
@@ -1950,7 +2108,8 @@ def dashboard():
                         <td>${s.started_at && s.finished_at ? fmtDur(Date.parse(s.finished_at) - Date.parse(s.started_at)) : '-'}</td>
                         <td>${s.status === 'completed' && s.result_path
                               ? `<a href="/api/results/${s.subtask_id}" style="color:var(--primary-dark)">Descargar</a>`
-                              : (s.error_message ? `<span title="${esc(s.error_message)}" style="color:var(--critical)">Ver error</span>` : '-')}</td>
+                              : (s.error_message ? `<span title="${esc(s.error_message)}" style="color:var(--critical)">Ver error</span>` : '-')}${
+                              infoText(s) ? `<br><small style="color:var(--muted)">${esc(infoText(s))}</small>` : ''}</td>
                     </tr>
                 `).join('');
             }
@@ -2441,6 +2600,7 @@ def dashboard():
 # ============================================================
 if __name__ == "__main__":
     ensure_schema()
+    ensure_long_task_policy()
 
     # Iniciar hilo que escucha resultados (barrier/join)
     result_thread = threading.Thread(target=listen_results, daemon=True)

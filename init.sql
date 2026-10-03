@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS workers (
     active_tasks    INT             DEFAULT 0,
     last_heartbeat  TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
     pools           VARCHAR(100),                -- pools que atiende: video,audio,ligera
-    concurrency     INT             DEFAULT 1    -- sub-tareas en paralelo
+    concurrency     INT             DEFAULT 1,   -- sub-tareas en paralelo
+    machine         JSONB                        -- nombre del equipo, CPU, núcleos, RAM, SO
 );
 
 CREATE TABLE IF NOT EXISTS cases (
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS subtasks (
     assigned_worker VARCHAR(50),
     error_message   TEXT,
     result_path     VARCHAR(500),
+    result_info     JSONB,                       -- resumen del worker (portada elegida, metadatos, tamaños)
     pool            VARCHAR(20),                 -- cola a la que se envió
     retries         INT             DEFAULT 0,   -- reintentos por errores transitorios
     reassignments   INT             DEFAULT 0,   -- veces que pasó a otro worker

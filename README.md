@@ -14,7 +14,8 @@ Proyecto/
 ├── coordinador/app.py        # API + routing + barrier/join + dashboard + reportes
 ├── worker/worker.py          # Worker (FFmpeg) — Dockerfile incluido
 ├── cliente/cliente.py        # Cliente: envío, carga concurrente, casos automáticos, métricas
-├── scripts/generar_dataset.py# Dataset sintético (~500 archivos con metadatos)
+├── scripts/descargar_dataset.py # Dataset con archivos reales de Wikimedia Commons (~480)
+├── scripts/generar_dataset.py   # Dataset sintético, sin internet (~480)
 ├── docker-compose.yml        # RabbitMQ + PostgreSQL
 ├── init.sql                  # Esquema de la base de datos
 └── docs/
@@ -75,20 +76,21 @@ Copiar la carpeta `worker/` a cada PC. Opciones de configuración:
 | `WORKER_ID` | `worker-<hostname>` | Nombre único del worker |
 | `WORKER_POOLS` | `video,audio,ligera` | Pools que atiende (los tres = genérico) |
 | `WORKER_CONCURRENCY` | `1` | Sub-tareas en paralelo en este nodo |
-| `CPU_HIGH` / `CPU_LOW` | `90` / `70` | Umbrales de CPU (%) para pausar / reanudar |
+| `CPU_HIGH` / `CPU_LOW` | `80` / `60` | Umbrales de CPU (%) para pausar / reanudar |
 
 **Con Docker** (en primer plano; se detiene con Ctrl+C):
 
 ```bash
 cd worker
 docker build -t worker .
-docker run --rm --name worker-1 -e COORDINATOR_IP=192.168.1.100 -e WORKER_ID=worker-1 worker
+docker run --rm --name worker-1 -e HOST_NAME=$(hostname) -e COORDINATOR_IP=192.168.1.100 -e WORKER_ID=worker-1 worker
 
 # Worker especializado en video que procesa 2 a la vez (PC con más núcleos):
 docker run --rm --name worker-video -e COORDINATOR_IP=192.168.1.100 \
   -e WORKER_ID=worker-video -e WORKER_POOLS=video -e WORKER_CONCURRENCY=2 worker
 ```
 
+- `-e HOST_NAME=$(hostname)` hace que el dashboard muestre el nombre real de la computadora (sin eso, dentro de Docker se ve el ID del contenedor). El dashboard también muestra la **IP desde la que llega cada worker**, el procesador, los núcleos y la RAM: así se evidencia que cada worker corre en una máquina distinta.
 - Si el worker corre **en la misma máquina** que el coordinador, agregue `--network host` y use `COORDINATOR_IP=localhost`.
 - En Linux, si aparece `permission denied ... docker.sock`, use `sudo` o ejecute `sudo usermod -aG docker $USER` y vuelva a iniciar sesión.
 
@@ -106,8 +108,14 @@ COORDINATOR_IP=192.168.1.100 WORKER_ID=worker-2 python worker.py
 
 ## 3. Dataset y pruebas
 
+Hay dos formas de armar el dataset (~480 archivos en 34 casos, homogéneos y heterogéneos, con metadatos):
+
 ```bash
-python scripts/generar_dataset.py                # ~480 archivos en 34 casos → ./dataset_prueba
+# Con archivos reales (videos, audios e imágenes de Wikimedia Commons, con licencia libre)
+python scripts/descargar_dataset.py              # → ./dataset_real  (requiere internet)
+
+# Sintético, sin internet (patrones y tonos generados con FFmpeg)
+python scripts/generar_dataset.py                # → ./dataset_prueba
 
 # Un caso
 python cliente/cliente.py enviar ./dataset_prueba/caso_022_heterogeneo
@@ -121,7 +129,9 @@ python cliente/cliente.py auto ./dataset_prueba --por evento --metricas pruebas/
 python cliente/cliente.py resumen
 ```
 
-Si el cliente corre en otra PC: `export COORDINATOR_URL=http://<IP>:8000`.
+Si el cliente corre en otra PC: `export COORDINATOR_URL=http://<IP>:8000`. Con el dataset real, reemplazar `./dataset_prueba` por `./dataset_real`.
+
+El dataset real descarga unos pocos originales (por defecto 12 videos, 20 audios y 30 imágenes) y de cada uno recorta fragmentos de distinta duración y resolución en todos los formatos: videos de 20 s a 3 min (360p a 1080p), audios de 30 s a 7 min e imágenes de hasta 4K. Además genera **10 archivos de 400–600 MB** (7 videos Full HD largos y 3 WAV de ~45 min) y un caso que mezcla 4 canciones con uno de esos videos. En total son unos 9 GB. Cada archivo conserva título, autor, licencia y enlace; la atribución queda en `dataset_real/CREDITOS.md`.
 
 ---
 

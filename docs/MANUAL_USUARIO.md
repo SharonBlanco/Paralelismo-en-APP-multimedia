@@ -38,7 +38,7 @@ Para cada worker se muestra:
 | CPU / Memoria | Último uso reportado |
 | Tareas | Sub-tareas que está procesando ahora |
 | Procesadas | Sub-tareas que terminó en total (muestra el reparto de carga) |
-| Versión | **v3** si corre la versión actual; **desactualizado** si hay que reiniciarlo o reconstruir su imagen |
+| Versión | **v4** si corre la versión actual; **desactualizado** si hay que reiniciarlo o reconstruir su imagen |
 
 Los workers desconectados quedan en gris al final y se pueden quitar de la lista con **Quitar**.
 
@@ -136,12 +136,24 @@ Reparto por worker:
 
 ## 3. Dataset de prueba
 
+**Con archivos reales (recomendado):**
+
 ```bash
-python scripts/generar_dataset.py                 # ~500 archivos en ./dataset_prueba
-python scripts/generar_dataset.py --escala 0.2    # versión chica para probar
+python scripts/descargar_dataset.py                 # ~480 archivos en ./dataset_real
+python scripts/descargar_dataset.py --escala 0.2    # versión chica para probar
 ```
 
-Genera casos homogéneos (solo audio a convertir, solo mp3, solo video, solo imágenes) y heterogéneos (audio + video + imágenes y, en algunos, un archivo no soportado o corrupto). Cada caso trae un `metadata.json`. En la raíz quedan `catalogo.json` (todos los archivos con sus metadatos, usado por `cliente.py auto`) y `composicion.json` (cantidades por tipo y tamaño, y volumen total).
+Ocupa unos 9 GB e incluye 10 archivos de 400–600 MB (7 videos Full HD largos y 3 WAV de ~45 min), más un caso con 4 canciones y uno de esos videos. Con `--muy-pesados 0` no se generan; con `--ligero` todos los archivos son chicos, para probar rápido.
+
+Busca en Wikimedia Commons videos de conciertos, festivales y desfiles, audios de piano, orquesta y coros, e imágenes de graduaciones, campus y escenarios, todos con licencia libre. A partir de esos originales recorta fragmentos livianos, medianos y pesados y los exporta a todos los formatos soportados. Los metadatos de cada archivo incluyen el título, autor, licencia y enlace reales, y `CREDITOS.md` lista la atribución que piden las licencias. Los originales quedan en `dataset_real/_originales/` y no se vuelven a descargar si se corre el script de nuevo con `--limpiar`.
+
+**Sintético, sin internet:**
+
+```bash
+python scripts/generar_dataset.py                 # ~480 archivos en ./dataset_prueba
+```
+
+Los dos generan la misma estructura de casos: homogéneos (solo audio a convertir, solo mp3, solo video, solo imágenes) y heterogéneos (audio + video + imágenes y, en algunos, un archivo no soportado o corrupto). Cada caso trae un `metadata.json`. En la raíz quedan `catalogo.json` (todos los archivos con sus metadatos, usado por `cliente.py auto`) y `composicion.json` (cantidades por tipo y tamaño, y volumen total).
 
 ---
 

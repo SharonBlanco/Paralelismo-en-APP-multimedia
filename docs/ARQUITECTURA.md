@@ -101,13 +101,38 @@ El coordinador decide las operaciones por la extensión de cada archivo (`determ
 
 | Tipo | Extensiones | Sub-tareas generadas | Pool |
 |---|---|---|---|
-| Video | mp4, mkv, avi, mov | conversión de formato (mp4↔mkv, avi/mov→mp4), extracción de audio (mp3) y portada (fotograma al 10 %) | `video` |
+| Video | mp4, mkv, avi, mov | conversión de formato (mp4↔mkv, avi/mov→mp4), extracción de audio (mp3) y portada elegida con criterio (ver 3.1) | `video` |
 | Audio sin comprimir o libre | wav, flac, ogg | conversión a mp3 | `audio` |
-| Audio mp3 | mp3 | extracción de metadatos (ffprobe → JSON) | `ligera` |
+| Audio mp3 | mp3 | metadatos técnicos y **asociados** (álbum, fecha, género, versión, letra; ver 3.2) | `ligera` |
 | Imagen | jpg, jpeg, png | miniatura de 320 px | `ligera` |
 | Otro | txt, pdf, … | ninguna: se marca **fallida por formato no soportado** en el mismo coordinador, sin ocupar un worker | — |
 
 Un caso heterogéneo genera entonces sub-tareas de distinto tipo y peso que se ejecutan en paralelo en distintos workers. Un solo video produce tres sub-tareas independientes.
+
+### 3.1 Portada de video con criterio
+
+La portada no es un cuadro cualquiera. El worker:
+
+1. Toma **5 ventanas** repartidas en el video (10 %, 30 %, 50 %, 70 % y 90 % de la duración).
+2. En cada una aplica el filtro `thumbnail` de FFmpeg, que analiza 60 cuadros y conserva el **más representativo**: el más parecido al histograma de color promedio, lo que descarta cuadros de transición, desenfocados o de fundido.
+3. Entre los 5 candidatos elige el de **mayor detalle visual**, medido por el tamaño del JPEG a igual resolución y calidad: un cuadro negro, en blanco o liso comprime muchísimo, y uno con contenido no.
+
+El reporte indica en qué segundo se tomó la portada.
+
+### 3.2 Asociación de metadatos e integración de letras
+
+Para cada mp3, el worker combina tres fuentes:
+
+| Fuente | Qué aporta |
+|---|---|
+| **ffprobe** (local) | Datos técnicos: duración, bitrate, códec, frecuencia, canales, y las etiquetas que trae el archivo |
+| **API de búsqueda de iTunes** (pública, sin clave) | Datos asociados a partir del título y el artista: álbum, fecha de lanzamiento, género, número de pista, duración oficial y carátula |
+| **MusicBrainz** (base de datos musical abierta) | Respaldo si iTunes no encuentra la canción o limita las consultas |
+| **lyrics.ovh** (pública) | Letra de la canción |
+
+También se detecta la **versión** (original, acústica, en vivo, remix, instrumental) a partir del título y del álbum. Todo se guarda en un JSON descargable, y el reporte muestra el resumen (por ejemplo, "Álbum: Parachutes (2000) · Género: Alternative · Letra: sí · Fuente: iTunes"). Si no hay internet o la canción no existe en esos servicios, la sub-tarea **no falla**: se entregan los metadatos técnicos y se indica que no hubo coincidencia.
+
+### 3.3 Metadatos del caso
 
 Además, cada caso puede traer **metadatos** (evento, sesión, usuario, lote y, por archivo, título, artista, álbum, etc.). Se guardan en `cases.metadata` (JSONB) y se integran en el reporte consolidado.
 
@@ -216,13 +241,15 @@ Cada mensaje de la cola `results` se procesa en una transacción (`handle_worker
 | Mensajes duplicados | Se descartan si la sub-tarea ya está en un estado final. |
 | Cancelación | Las sub-tareas sin terminar pasan a `cancelled`. El worker que tome una de la cola recibe `410 Gone` al descargar el archivo y la descarta sin procesarla. |
 | Worker sin heartbeat por 15 s | Se marca `desconectado` (offline). Ya no cuenta como activo. |
+| Sub-tareas muy largas (videos de 400–600 MB) | RabbitMQ re-entrega por defecto un mensaje sin confirmar después de 30 min (`consumer_timeout`), lo que haría rebotar una conversión larga. Al arrancar, el coordinador define una **política** que sube ese límite a 4 h para las colas de trabajo. |
+| Archivos grandes en tránsito | Los archivos viajan por partes: el cliente sube el lote como flujo, los workers descargan de a 1 MB y suben el resultado sin cargarlo entero en memoria. |
 
 ---
 
 ## 8. Monitoreo de recursos y reacción a la carga
 
 - Cada worker envía un **heartbeat** cada ~5 s con: CPU, memoria, sub-tareas activas, pools, concurrencia, versión y si está saturado. Se guarda el estado actual (`workers`) y el historial (`resource_logs`).
-- **Reacción a la saturación:** si la CPU de un worker supera `CPU_HIGH` (90 %) en dos mediciones seguidas, el worker **cancela su suscripción** a las colas y deja de recibir sub-tareas nuevas. RabbitMQ se las entrega a los demás workers (**redistribución de carga**). Cuando la CPU baja de `CPU_LOW` (70 %), vuelve a suscribirse. En el dashboard aparece como `saturado`, y la cola muestra un consumidor menos.
+- **Reacción a la saturación:** si la CPU de un worker supera `CPU_HIGH` (**80 %**) en dos mediciones seguidas, el worker **cancela su suscripción** a las colas y deja de recibir sub-tareas nuevas. RabbitMQ se las entrega a los demás workers (**redistribución de carga**). Cuando la CPU baja de `CPU_LOW` (60 %), vuelve a suscribirse. En el dashboard aparece como `saturado`, y la cola muestra un consumidor menos.
 - El dashboard muestra: tarjetas globales, **colas por pool** (en espera y consumidores), workers (estado, pools, CPU, RAM, tareas activas, sub-tareas procesadas, versión), casos con desglose de sub-tareas (en espera, en ejecución, completadas, fallidas), detalle por sub-tarea con progreso, y una **trazabilidad** con mapa de flujo (caso → archivo → sub-tarea → worker) y línea de tiempo por worker que evidencia el paralelismo.
 
 ---
@@ -320,7 +347,7 @@ Documentación interactiva en `http://<coordinador>:8000/docs`.
 | DELETE | `/api/workers/{id}` | Quitar un worker desconectado de la lista |
 | POST | `/api/workers/heartbeat` | *(worker)* métricas de recursos |
 | GET | `/api/files/{caso}/{archivo}` | *(worker)* descargar original (410 si el caso se canceló) |
-| POST | `/api/results/{sub-tarea}` | *(worker)* subir resultado |
+| POST | `/api/results/{sub-tarea}/raw?filename=` | *(worker)* subir resultado como flujo de bytes |
 | GET | `/api/results/{sub-tarea}` | Descargar un resultado |
 | POST | `/api/subtasks/{id}/progress` | *(worker)* informar % de avance |
 

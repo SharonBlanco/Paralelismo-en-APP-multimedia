@@ -1,0 +1,43 @@
+{
+  "fecha": "2026-10-02T20:08:35",
+  "coordinador": "http://localhost:8000",
+  "envios_concurrentes": 4,
+  "casos": 34,
+  "estados": {
+    "partially_completed": 7,
+    "completed": 27
+  },
+  "archivos": 481,
+  "sub_tareas": 631,
+  "tiempo_envio_s": 9.1,
+  "tiempo_total_s": 91.3,
+  "rendimiento_archivos_por_min": 316.0,
+  "tiempo_secuencial_estimado_s": 203.8,
+  "speedup_global": 2.23,
+  "duracion_media_caso_s": 49.6,
+  "reintentos": 0,
+  "redistribuciones": 0,
+  "por_worker": {
+    "worker-1": {
+      "subtasks": 280,
+      "completed": 272,
+      "failed": 8,
+      "busy_seconds": 80.3,
+      "porcentaje_subtareas": 44.4
+    },
+    "worker-2": {
+      "subtasks": 71,
+      "completed": 71,
+      "failed": 0,
+      "busy_seconds": 42.9,
+      "porcentaje_subtareas": 11.3
+    },
+    "worker-3": {
+      "subtasks": 275,
+      "completed": 274,
+      "failed": 1,
+      "busy_seconds": 80.6,
+      "porcentaje_subtareas": 43.6
+    }
+  }
+}
