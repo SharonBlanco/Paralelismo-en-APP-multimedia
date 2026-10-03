@@ -1,0 +1,57 @@
+[*] Buscando 12 videos en Wikimedia Commons...
+  [✓] 12 videos (115 MB)
+[*] Buscando 20 audios en Wikimedia Commons...
+  [✓] 20 audios (44 MB)
+[*] Buscando 30 imagens en Wikimedia Commons...
+  [✓] 30 imagens (178 MB)
+[*] Se conservan 21 casos (del 1 al 21)
+[*] Generando 136 archivos derivados en 35 casos...
+  50/136 (143 s)
+  [!] c028_video_10_muy_pesado.mkv: [out#0/matroska @ 0x5f11d577f540] Output file does not contain any stream
+Error opening output file dataset_real/caso_028_heterogeneo/c028_video_10_mu
+  100/136 (221 s)
+
+==================================================
+Dataset listo en /home/sharon/Documents/SEMESTRE VIII/SISTEMAS OPERATIVOS/SEMANA 9/Proyecto/dataset_real  (266 s)
+{
+  "origen": "Wikimedia Commons",
+  "originales_descargados": {
+    "video": 12,
+    "audio": 20,
+    "imagen": 30
+  },
+  "originales_usados": 62,
+  "archivos": 416,
+  "casos": 35,
+  "casos_por_tipo": {
+    "homogeneo": 21,
+    "heterogeneo": 14
+  },
+  "archivos_por_tipo": {
+    "audio": 210,
+    "video": 56,
+    "imagen": 150
+  },
+  "archivos_por_tamano": {
+    "pesado": 168,
+    "liviano": 144,
+    "mediano": 95,
+    "muy_pesado": 9
+  },
+  "archivos_por_formato": {
+    "wav": 50,
+    "flac": 45,
+    "ogg": 46,
+    "mp3": 69,
+    "avi": 17,
+    "mov": 12,
+    "mp4": 13,
+    "mkv": 14,
+    "png": 77,
+    "jpg": 73
+  },
+  "volumen_total_mb": 10716.1,
+  "errores": 1
+}
+Créditos: dataset_real/CREDITOS.md
+==================================================

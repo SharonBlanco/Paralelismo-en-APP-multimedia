@@ -18,6 +18,7 @@ Uso:
 import os
 import json
 import shutil
+import tempfile
 import socket
 import subprocess
 import uuid
@@ -78,6 +79,14 @@ UPLOAD_DIR  = Path("./uploads")
 RESULTS_DIR = Path("./results")
 UPLOAD_DIR.mkdir(exist_ok=True)
 RESULTS_DIR.mkdir(exist_ok=True)
+
+# Mientras recibe un upload, FastAPI guarda cada archivo en un temporal.
+# Por defecto va a /tmp, que en muchas distros es RAM de 1-2 GB: varios
+# casos de cientos de MB a la vez lo llenan y el upload falla con 400.
+# Se usa una carpeta en disco.
+TMP_DIR = (UPLOAD_DIR / ".tmp").resolve()
+TMP_DIR.mkdir(exist_ok=True)
+tempfile.tempdir = str(TMP_DIR)
 
 # ============================================================
 # CONEXIONES
@@ -1411,12 +1420,15 @@ def get_trace(case_id: str | None = None, last_cases: int = 5):
     return {"now": to_local(now).isoformat(), "subtasks": subtasks, "workers": workers}
 
 
-SIZE_BUCKETS = [
-    ("< 100 KB", 100 * 1024),
-    ("100 KB – 1 MB", 1024 ** 2),
-    ("1 – 10 MB", 10 * 1024 ** 2),
-    ("10 – 50 MB", 50 * 1024 ** 2),
-    ("> 50 MB", None),
+MB = 1024 ** 2
+SIZE_BUCKETS = [               # rangos pensados para ver desde miniaturas hasta archivos de 400–600 MB
+    ("< 1 MB", MB),
+    ("1 – 10 MB", 10 * MB),
+    ("10 – 50 MB", 50 * MB),
+    ("50 – 200 MB", 200 * MB),
+    ("200 – 400 MB", 400 * MB),
+    ("400 – 600 MB", 600 * MB),
+    ("> 600 MB", None),
 ]
 
 
@@ -1446,7 +1458,7 @@ def dataset_stats():
     db.close()
 
     by_type, by_format = {}, {}
-    buckets = [{"label": label, "by_type": {}} for label, _ in SIZE_BUCKETS]
+    buckets = [{"label": label, "by_type": {}, "bytes": 0} for label, _ in SIZE_BUCKETS]
     sizes = []
     for f in files:
         t = f["file_type"]
@@ -1463,6 +1475,7 @@ def dataset_stats():
             for b, (_, limit) in zip(buckets, SIZE_BUCKETS):
                 if limit is None or size < limit:
                     b["by_type"][t] = b["by_type"].get(t, 0) + 1
+                    b["bytes"] += size
                     break
 
     sizes.sort()
@@ -1647,13 +1660,13 @@ def dashboard():
             .hbar-track { height:12px; }
             .hbar { height:100%; border-radius:0 4px 4px 0; min-width:3px; }
             .hbar-val { color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; }
-            .cols { display:flex; align-items:flex-end; gap:10px; height:150px; border-bottom:1px solid #a5d8e3; }
+            .cols { display:flex; align-items:flex-end; gap:6px; height:150px; border-bottom:1px solid #a5d8e3; }
             .col { flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; }
             .col .total { text-align:center; font-size:0.76em; color:var(--text); margin-bottom:3px; font-variant-numeric:tabular-nums; }
             .col .stack { display:flex; flex-direction:column-reverse; gap:2px; }
             .col .stack .seg:last-child { border-radius:4px 4px 0 0; }
-            .col-labels { display:flex; gap:10px; margin-top:5px; }
-            .col-labels div { flex:1; text-align:center; font-size:0.7em; color:var(--muted); line-height:1.25; }
+            .col-labels { display:flex; gap:6px; margin-top:5px; }
+            .col-labels div { flex:1; text-align:center; font-size:0.66em; color:var(--muted); line-height:1.25; }
             .variety details { margin-top:12px; font-size:0.85em; }
             .variety summary { cursor:pointer; color:var(--primary-dark); }
             .variety details table { margin-top:8px; }
@@ -2143,6 +2156,17 @@ def dashboard():
                 renderVariety(d);
             }
 
+            // Los archivos grandes son pocos (barra baja) pero pesan mucho: se resalta su volumen
+            function pesadosNota(d) {
+                const grandes = d.size_buckets.slice(4);              // 200 MB en adelante
+                const n = grandes.reduce((a, b) => a + Object.values(b.by_type).reduce((x, y) => x + y, 0), 0);
+                if (!n) return '';
+                const bytes = grandes.reduce((a, b) => a + (b.bytes || 0), 0);
+                const pct = d.bytes ? Math.round(bytes / d.bytes * 100) : 0;
+                return `<p class="hint" style="margin:10px 0 0">${plural(n, 'archivo', 'archivos')} de más de 200 MB: ` +
+                       `<b style="color:var(--text)">${fmtBytes(bytes)}</b>, el ${pct}% del volumen total.</p>`;
+            }
+
             function renderVariety(d) {
                 const types = TYPE_ORDER.filter(t => d.by_type[t]).concat(
                     Object.keys(d.by_type).filter(t => !TYPE_ORDER.includes(t)));
@@ -2206,7 +2230,8 @@ def dashboard():
                         }).join('');
                         return `<div class="col"><div class="total">${totals[i] || ''}</div><div class="stack">${segs}</div></div>`;
                     }).join('') + `</div>` +
-                    `<div class="col-labels">${d.size_buckets.map(b => `<div>${b.label}</div>`).join('')}</div>`;
+                    `<div class="col-labels">${d.size_buckets.map(b => `<div>${b.label}</div>`).join('')}</div>` +
+                    pesadosNota(d);
 
                 // Tabla
                 document.querySelector('#variety-table tbody').innerHTML = formats.map(f => `

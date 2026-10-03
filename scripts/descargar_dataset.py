@@ -40,7 +40,7 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
-from generar_dataset import planificar, elegir_tamano  # mismo plan de casos
+from generar_dataset import planificar, elegir_tamano, EVENTOS, USUARIOS  # mismo plan de casos
 
 random.seed(2026)
 
@@ -253,6 +253,58 @@ def derivar_muy_pesado(o, destino: Path, objetivo_mb: float):
     return {"duracion_s": round(dur), "alto_px": 1080}
 
 
+def meta_de(o, c, tamano, tipo):
+    return {"titulo": o["titulo"], "artista": o["autor"], "album": c["evento"],
+            "licencia": o["licencia"], "fuente": o["fuente"], "original": o["commons"],
+            "evento": c["evento"], "sesion": c["sesion"], "usuario": c["usuario"],
+            "lote": c["lote"], "tamano": tamano, "tipo": tipo}
+
+
+def plan_pesados(desde, cantidad, n_muy, originales, salida):
+    """
+    Casos heterogéneos con SOLO archivos pesados: en cada uno, 1 video de
+    3 min en Full HD, 3 audios de 7 min y 5 fotos 4K; y en los primeros
+    `n_muy` casos, además, un archivo de 400–600 MB (2/3 videos, 1/3 WAV).
+    """
+    n_video = max(1, round(n_muy * 2 / 3)) if n_muy else 0
+    muy = ["video"] * n_video + ["audio"] * (n_muy - n_video)
+    casos, trabajos = [], []
+    for j in range(cantidad):
+        num = desde + j
+        c = {"nombre": f"caso_{num:03d}_heterogeneo", "tipo": "heterogeneo",
+             "evento": random.choice(EVENTOS), "sesion": f"S{random.randint(1, 4)}",
+             "usuario": random.choice(USUARIOS), "lote": f"L-{num:03d}",
+             "descripcion": "Material pesado de un evento: video Full HD, audios largos y fotos 4K",
+             "prioridad": random.choice([3, 5, 5, 7, 10]), "files": {}}
+        cdir = salida / c["nombre"]
+        cdir.mkdir()
+        pref = f"c{num:03d}"
+        composicion = ([("video", random.choice([".mp4", ".mkv", ".mov", ".avi"]))] +
+                       [("audio", random.choice([".wav", ".flac", ".ogg", ".mp3"])) for _ in range(3)] +
+                       [("imagen", random.choice([".png", ".jpg"])) for _ in range(5)])
+        for i, (gen, ext) in enumerate(composicion, 1):
+            o = random.choice(originales[gen])
+            nombre = f"{pref}_{gen}_{i:02d}_pesado{ext}"
+            c["files"][nombre] = meta_de(o, c, "pesado", gen)
+            trabajos.append((gen, o, cdir / nombre, "pesado", c["files"][nombre]))
+        if j < len(muy):
+            tipo = muy[j]
+            ext = random.choice([".mp4", ".mkv", ".mov"]) if tipo == "video" else ".wav"
+            o = random.choice(originales[tipo])
+            nombre = f"{pref}_{tipo}_{len(composicion) + 1:02d}_muy_pesado{ext}"
+            c["files"][nombre] = meta_de(o, c, "muy_pesado", tipo)
+            trabajos.append(("muy_pesado", o, cdir / nombre, random.uniform(430, 570), c["files"][nombre]))
+        casos.append(c)
+    return casos, trabajos
+
+
+def numero_caso(d: Path):
+    try:
+        return int(d.name.split("_")[1])
+    except (IndexError, ValueError):
+        return None
+
+
 # ============================================================
 # MAIN
 # ============================================================
@@ -268,6 +320,10 @@ def main():
     ap.add_argument("--muy-pesados", type=int, default=10,
                     help="archivos de 400–600 MB (2/3 videos largos, 1/3 WAV); 0 para no generarlos")
     ap.add_argument("--ligero", action="store_true", help="tamaños chicos, para probar rápido")
+    ap.add_argument("--pesados-desde", type=int, metavar="N",
+                    help="conserva los casos anteriores a N y reemplaza desde el N en adelante por "
+                         "casos heterogéneos con solo archivos pesados")
+    ap.add_argument("--casos-pesados", type=int, default=14, help="cuántos casos pesados crear (con --pesados-desde)")
     args = ap.parse_args()
     if args.ligero:
         PERFIL.update(PERFIL_LIGERO)
@@ -276,7 +332,12 @@ def main():
         raise SystemExit("[!] FFmpeg no está instalado")
 
     salida = Path(args.salida)
-    if salida.exists() and any(d.name.startswith("caso_") for d in salida.iterdir()):
+    if args.pesados_desde:
+        # Solo se borran los casos desde N en adelante; los anteriores quedan intactos
+        for d in list(salida.glob("caso_*")) if salida.exists() else []:
+            if (numero_caso(d) or 0) >= args.pesados_desde:
+                shutil.rmtree(d)
+    elif salida.exists() and any(d.name.startswith("caso_") for d in salida.iterdir()):
         if not args.limpiar:
             raise SystemExit(f"[!] {salida} ya tiene casos. Usá --limpiar para regenerarlos.")
         for d in salida.iterdir():
@@ -312,78 +373,104 @@ def main():
         if not listos:
             raise SystemExit(f"[!] No se consiguió ningún {tipo}. Revisá la conexión e intentá de nuevo.")
 
-    # --- 2. plan de casos y archivos derivados ---
-    casos = planificar(args.escala)
-    trabajos = []
-    for c in casos:
-        cdir = salida / c["nombre"]
-        cdir.mkdir()
-        c["files"] = {}
-        pref = f"c{c['nombre'][5:8]}"
-        for i, (gen, ext) in enumerate(c["archivos"], 1):
-            if gen == "otro":
-                nombre = f"{pref}_corrupto_{i:02d}{ext}" if ext == ".mp4" else f"{pref}_notas_{i:02d}{ext}"
-                c["files"][nombre] = {"titulo": "Archivo no soportado", "evento": c["evento"],
-                                      "sesion": c["sesion"], "usuario": c["usuario"], "lote": c["lote"],
-                                      "tipo": "otro", "tamano": "liviano"}
-                trabajos.append(("otro", None, cdir / nombre, "liviano", c["files"][nombre]))
-                continue
-            tamano = elegir_tamano()
-            o = random.choice(originales[gen])
-            nombre = f"{pref}_{gen}_{i:02d}_{tamano}{ext}"
-            meta = {
-                "titulo": o["titulo"], "artista": o["autor"], "album": c["evento"],
-                "licencia": o["licencia"], "fuente": o["fuente"], "original": o["commons"],
-                "evento": c["evento"], "sesion": c["sesion"], "usuario": c["usuario"],
-                "lote": c["lote"], "tamano": tamano, "tipo": gen,
-            }
-            c["files"][nombre] = meta
-            trabajos.append((gen, o, cdir / nombre, tamano, meta))
-
-    # --- archivos muy pesados (400–600 MB) ---
-    # El primero va en un caso que replica el ejemplo de la clase: un lote
-    # chico (4 mp3) con un archivo enorme; el resto, uno por caso heterogéneo.
-    if args.muy_pesados > 0:
-        n_video = max(1, round(args.muy_pesados * 2 / 3))
-        tipos = ["video"] * n_video + ["audio"] * (args.muy_pesados - n_video)
-        lote = {"nombre": f"caso_{len(casos) + 1:03d}_lote_con_archivo_pesado", "tipo": "heterogeneo",
-                "evento": "Graduación 2026", "sesion": "S1", "usuario": "sharon", "lote": f"L-{len(casos) + 1:03d}",
-                "descripcion": "Lote chico (4 canciones) con un video de cientos de MB", "prioridad": 5,
-                "archivos": [("audio", ".mp3")] * 4}
-        casos.append(lote)
-        cdir = salida / lote["nombre"]
-        cdir.mkdir()
-        lote["files"] = {}
-        pref = f"c{lote['nombre'][5:8]}"
-        for i in range(4):
-            o = random.choice(originales["audio"])
-            nombre = f"{pref}_audio_{i + 1:02d}_mediano.mp3"
-            lote["files"][nombre] = {"titulo": o["titulo"], "artista": o["autor"], "album": lote["evento"],
-                                     "licencia": o["licencia"], "fuente": o["fuente"], "original": o["commons"],
-                                     "evento": lote["evento"], "sesion": "S1", "usuario": "sharon",
-                                     "lote": lote["lote"], "tamano": "mediano", "tipo": "audio"}
-            trabajos.append(("audio", o, cdir / nombre, "mediano", lote["files"][nombre]))
-
-        destinos = [lote] + [c for c in casos if c["tipo"] == "heterogeneo" and c is not lote]
-        for k, tipo in enumerate(tipos):
-            c = destinos[k % len(destinos)]
-            ext = random.choice([".mp4", ".mkv", ".mov"]) if tipo == "video" else ".wav"
-            o = random.choice(originales[tipo])
+    if args.pesados_desde:
+        # Casos ya existentes (se conservan tal cual) + casos pesados nuevos
+        casos = []
+        for d in sorted(salida.glob("caso_*"), key=lambda d: numero_caso(d) or 0):
+            meta_path = d / "metadata.json"
+            if (numero_caso(d) or 0) < args.pesados_desde and meta_path.exists():
+                m = json.loads(meta_path.read_text(encoding="utf-8"))
+                casos.append({"nombre": d.name, "tipo": m.get("tipo", "homogeneo"), "files": m.get("files", {}),
+                              **{k: m.get(k) for k in ("evento", "sesion", "usuario", "lote",
+                                                       "descripcion", "prioridad")}})
+        print(f"[*] Se conservan {len(casos)} casos (del 1 al {args.pesados_desde - 1})")
+        nuevos, trabajos = plan_pesados(args.pesados_desde, args.casos_pesados, args.muy_pesados,
+                                        originales, salida)
+        casos += nuevos
+    else:
+        # --- 2. plan de casos y archivos derivados ---
+        casos = planificar(args.escala)
+        trabajos = []
+        for c in casos:
+            cdir = salida / c["nombre"]
+            cdir.mkdir()
+            c["files"] = {}
             pref = f"c{c['nombre'][5:8]}"
-            nombre = f"{pref}_{tipo}_{len(c['files']) + 1:02d}_muy_pesado{ext}"
-            meta = {"titulo": o["titulo"], "artista": o["autor"], "album": c["evento"],
+            for i, (gen, ext) in enumerate(c["archivos"], 1):
+                if gen == "otro":
+                    nombre = f"{pref}_corrupto_{i:02d}{ext}" if ext == ".mp4" else f"{pref}_notas_{i:02d}{ext}"
+                    c["files"][nombre] = {"titulo": "Archivo no soportado", "evento": c["evento"],
+                                          "sesion": c["sesion"], "usuario": c["usuario"], "lote": c["lote"],
+                                          "tipo": "otro", "tamano": "liviano"}
+                    trabajos.append(("otro", None, cdir / nombre, "liviano", c["files"][nombre]))
+                    continue
+                tamano = elegir_tamano()
+                o = random.choice(originales[gen])
+                nombre = f"{pref}_{gen}_{i:02d}_{tamano}{ext}"
+                meta = {
+                    "titulo": o["titulo"], "artista": o["autor"], "album": c["evento"],
                     "licencia": o["licencia"], "fuente": o["fuente"], "original": o["commons"],
                     "evento": c["evento"], "sesion": c["sesion"], "usuario": c["usuario"],
-                    "lote": c["lote"], "tamano": "muy_pesado", "tipo": tipo}
-            c["files"][nombre] = meta
-            trabajos.append(("muy_pesado", o, salida / c["nombre"] / nombre, random.uniform(430, 570), meta))
+                    "lote": c["lote"], "tamano": tamano, "tipo": gen,
+                }
+                c["files"][nombre] = meta
+                trabajos.append((gen, o, cdir / nombre, tamano, meta))
+
+        # --- archivos muy pesados (400–600 MB) ---
+        # El primero va en un caso que replica el ejemplo de la clase: un lote
+        # chico (4 mp3) con un archivo enorme; el resto, uno por caso heterogéneo.
+        if args.muy_pesados > 0:
+            n_video = max(1, round(args.muy_pesados * 2 / 3))
+            tipos = ["video"] * n_video + ["audio"] * (args.muy_pesados - n_video)
+            lote = {"nombre": f"caso_{len(casos) + 1:03d}_lote_con_archivo_pesado", "tipo": "heterogeneo",
+                    "evento": "Graduación 2026", "sesion": "S1", "usuario": "sharon", "lote": f"L-{len(casos) + 1:03d}",
+                    "descripcion": "Lote chico (4 canciones) con un video de cientos de MB", "prioridad": 5,
+                    "archivos": [("audio", ".mp3")] * 4}
+            casos.append(lote)
+            cdir = salida / lote["nombre"]
+            cdir.mkdir()
+            lote["files"] = {}
+            pref = f"c{lote['nombre'][5:8]}"
+            for i in range(4):
+                o = random.choice(originales["audio"])
+                nombre = f"{pref}_audio_{i + 1:02d}_mediano.mp3"
+                lote["files"][nombre] = {"titulo": o["titulo"], "artista": o["autor"], "album": lote["evento"],
+                                         "licencia": o["licencia"], "fuente": o["fuente"], "original": o["commons"],
+                                         "evento": lote["evento"], "sesion": "S1", "usuario": "sharon",
+                                         "lote": lote["lote"], "tamano": "mediano", "tipo": "audio"}
+                trabajos.append(("audio", o, cdir / nombre, "mediano", lote["files"][nombre]))
+
+            destinos = [lote] + [c for c in casos if c["tipo"] == "heterogeneo" and c is not lote]
+            for k, tipo in enumerate(tipos):
+                c = destinos[k % len(destinos)]
+                ext = random.choice([".mp4", ".mkv", ".mov"]) if tipo == "video" else ".wav"
+                o = random.choice(originales[tipo])
+                pref = f"c{c['nombre'][5:8]}"
+                nombre = f"{pref}_{tipo}_{len(c['files']) + 1:02d}_muy_pesado{ext}"
+                meta = {"titulo": o["titulo"], "artista": o["autor"], "album": c["evento"],
+                        "licencia": o["licencia"], "fuente": o["fuente"], "original": o["commons"],
+                        "evento": c["evento"], "sesion": c["sesion"], "usuario": c["usuario"],
+                        "lote": c["lote"], "tamano": "muy_pesado", "tipo": tipo}
+                c["files"][nombre] = meta
+                trabajos.append(("muy_pesado", o, salida / c["nombre"] / nombre, random.uniform(430, 570), meta))
 
     print(f"[*] Generando {len(trabajos)} archivos derivados en {len(casos)} casos...")
     errores, hechos = 0, 0
 
     def hacer(gen, o, destino, tamano, meta):
-        if gen == "muy_pesado":
-            return derivar_muy_pesado(o, destino, tamano)      # aquí "tamano" es el objetivo en MB
+        if gen == "muy_pesado":                                # aquí "tamano" es el objetivo en MB
+            # Algunos originales no se pueden repetir en bucle: probar con otros
+            candidatos = [o] + random.sample(originales[o["tipo"]], min(3, len(originales[o["tipo"]])))
+            for intento, orig in enumerate(candidatos):
+                try:
+                    r = derivar_muy_pesado(orig, destino, tamano)
+                    meta.update(titulo=orig["titulo"], artista=orig["autor"], licencia=orig["licencia"],
+                                fuente=orig["fuente"], original=orig["commons"])
+                    return r
+                except subprocess.CalledProcessError:
+                    destino.unlink(missing_ok=True)
+                    if intento == len(candidatos) - 1:
+                        raise
         if gen == "video":
             return derivar_video(o, destino, tamano)
         if gen == "audio":

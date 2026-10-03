@@ -379,6 +379,7 @@ if __name__ == "__main__":
         p.add_argument("--metricas", help="guardar métricas en este CSV (implica --esperar)")
         p.add_argument("--prioridad-aleatoria", action="store_true")
         p.add_argument("--max-casos", type=int, help="enviar solo los primeros N casos")
+        p.add_argument("--filtro", help="enviar solo los casos cuyo nombre contenga este texto (p. ej. heterogeneo)")
         if nombre == "auto":
             p.add_argument("--por", choices=["carpeta", "evento", "sesion", "usuario", "lote"], default="evento")
 
@@ -400,6 +401,8 @@ if __name__ == "__main__":
     elif args.comando in ("carga", "auto"):
         criterio = "carpeta" if args.comando == "carga" else args.por
         grupos = agrupar(Path(args.dataset_dir), criterio)
+        if args.filtro:
+            grupos = [g for g in grupos if args.filtro.lower() in g[0].lower()]
         if args.max_casos:
             grupos = grupos[:args.max_casos]
         enviar_lote(grupos, args.concurrentes, args.esperar, args.metricas, args.prioridad_aleatoria)
