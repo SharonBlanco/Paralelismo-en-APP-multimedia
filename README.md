@@ -1,100 +1,81 @@
 # Plataforma Distribuida de Procesamiento Multimedia por Casos
 ### IC-6600 · Principios de Sistemas Operativos — TEC Campus San Carlos · II Semestre 2026
 
-Plataforma que recibe **casos** (conjuntos de archivos de audio, video e imágenes, homogéneos o heterogéneos), los descompone en sub-tareas según el tipo de cada archivo y las distribuye entre **workers en computadoras distintas** mediante colas de RabbitMQ. Monitorea los recursos de cada nodo y genera un **reporte consolidado** por caso.
+## ¿Qué hace?
 
-| Documento | Contenido |
+Recibe **casos**: grupos de archivos de video, audio e imágenes, por ejemplo todo el material de un evento. Divide cada caso en tareas chicas (convertir un video, extraer un audio, buscar los datos de una canción…) y las reparte entre **workers que corren en computadoras distintas**, que las procesan al mismo tiempo. Cuando todas las tareas de un caso terminan, genera un **reporte**. Un **dashboard** web muestra todo en vivo: qué computadora hizo qué, cuánta CPU usa cada una y cómo avanza cada caso.
+
+| Documento | Para qué sirve |
 |---|---|
-| [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | Arquitectura, flujo, routing, pools especializados (Unidad 1), estados, barrier/join, tolerancia a fallos, API |
-| [docs/MANUAL_USUARIO.md](docs/MANUAL_USUARIO.md) | Uso del dashboard y del cliente de línea de comandos |
-| [docs/INFORME_PRUEBAS.md](docs/INFORME_PRUEBAS.md) | Plan de pruebas y plantilla del informe |
+| [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | Cómo está armado el sistema y por qué |
+| [docs/MANUAL_USUARIO.md](docs/MANUAL_USUARIO.md) | Cómo usar el dashboard y el cliente |
+| [docs/INFORME_PRUEBAS.md](docs/INFORME_PRUEBAS.md) | Qué pruebas hacer y dónde anotar los resultados |
+
+## Las piezas
 
 ```
-Proyecto/
-├── coordinador/app.py        # API + routing + barrier/join + dashboard + reportes
-├── worker/worker.py          # Worker (FFmpeg) — Dockerfile incluido
-├── cliente/cliente.py        # Cliente: envío, carga concurrente, casos automáticos, métricas
-├── scripts/descargar_dataset.py # Dataset con archivos reales de Wikimedia Commons (~480)
-├── scripts/generar_dataset.py   # Dataset sintético, sin internet (~480)
-├── docker-compose.yml        # RabbitMQ + PostgreSQL
-├── init.sql                  # Esquema de la base de datos
-└── docs/
+         Navegador o cliente.py  →  suben casos
+                      │
+                      ▼
+┌──────────── Computadora del coordinador ────────────┐
+│  Coordinador (reparte y junta)    PostgreSQL (estado) │
+│  RabbitMQ (filas de espera de tareas)                │
+│  uploads/ (originales)   results/ (resultados)       │
+└──────────────────────────────────────────────────────┘
+        │                     │                    │
+        ▼                     ▼                    ▼
+   worker-1 (PC 1)       worker-2 (PC 2)      worker-3 (PC 3)
 ```
+
+| Carpeta / archivo | Qué es |
+|---|---|
+| `coordinador/app.py` | El coordinador: recibe casos, reparte, junta resultados, dashboard y reportes |
+| `worker/worker.py` | El worker que corre en cada computadora (incluye `Dockerfile`) |
+| `cliente/cliente.py` | Programa de terminal para mandar casos y medir tiempos |
+| `scripts/descargar_dataset.py` | Arma el dataset de prueba con archivos reales de internet |
+| `scripts/generar_dataset.py` | Arma un dataset de prueba sin internet (archivos sintéticos) |
+| `docker-compose.yml` | Enciende RabbitMQ y PostgreSQL |
+| `init.sql` | Crea las tablas de la base de datos |
 
 ---
 
-## Arquitectura en una imagen
+## 1. Encender el coordinador
 
-```
-                 Cliente (cliente.py / navegador)
-                              │ HTTP
-                              ▼
-┌───────────────────── Nodo coordinador ─────────────────────┐
-│  Coordinador (FastAPI) ── PostgreSQL     uploads/ results/  │
-│        │  ▲                                                 │
-│        ▼  │                                                 │
-│  RabbitMQ: tareas.video · tareas.audio · tareas.ligera      │
-│            results                                          │
-└────────────────────────────────────────────────────────────┘
-        │ AMQP + HTTP             │                   │
-        ▼                         ▼                   ▼
-  ┌───────────┐            ┌───────────┐        ┌───────────┐
-  │ worker-1  │            │ worker-2  │        │ worker-3  │
-  │ PC #1     │            │ PC #2     │        │ PC #3     │
-  └───────────┘            └───────────┘        └───────────┘
-```
-
----
-
-## 1. Nodo coordinador
-
-Requisitos: Docker, Python 3.11 o superior, y FFmpeg (solo si también correrá un worker ahí).
+En la computadora que hace de coordinador (necesita Docker y Python 3.11 o más nuevo):
 
 ```bash
 cd Proyecto
-docker compose up -d                       # RabbitMQ (5672, panel 15672) + PostgreSQL (5435)
-python3 -m venv .venv
+docker compose up -d                   # enciende RabbitMQ y PostgreSQL
+python3 -m venv .venv                  # solo la primera vez
 source .venv/bin/activate
-pip install -r coordinador/requirements.txt -r worker/requirements.txt
-python coordinador/app.py                  # correrlo desde la carpeta Proyecto
+pip install -r coordinador/requirements.txt -r worker/requirements.txt   # solo la primera vez
+python coordinador/app.py
 ```
 
-- Dashboard: `http://localhost:8000` · API: `http://localhost:8000/docs`
-- Panel de RabbitMQ: `http://localhost:15672` (admin / admin123)
-- IP para los workers: `hostname -I` (Linux) o `ipconfig` (Windows)
-- Si la red tiene firewall, abrir los puertos **5672** y **8000**.
+- **Dashboard:** `http://localhost:8000`
+- **Panel de RabbitMQ:** `http://localhost:15672` (usuario `admin`, contraseña `admin123`)
+- **La IP que van a usar los workers:** `hostname -I` (Linux) o `ipconfig` (Windows).
 
 ---
 
-## 2. Nodos worker (uno por computadora)
+## 2. Encender un worker en cada computadora
 
-Copiar la carpeta `worker/` a cada PC. Opciones de configuración:
+Cada integrante necesita la carpeta `worker/` en su computadora. Cada worker tiene que tener un **nombre distinto**.
 
-| Variable | Valor por defecto | Descripción |
-|---|---|---|
-| `COORDINATOR_IP` | `localhost` | IP del nodo coordinador |
-| `WORKER_ID` | `worker-<hostname>` | Nombre único del worker |
-| `WORKER_POOLS` | `video,audio,ligera` | Pools que atiende (los tres = genérico) |
-| `WORKER_CONCURRENCY` | `1` | Sub-tareas en paralelo en este nodo |
-| `CPU_HIGH` / `CPU_LOW` | `80` / `60` | Umbrales de CPU (%) para pausar / reanudar |
-
-**Con Docker** (en primer plano; se detiene con Ctrl+C):
+**Con Docker** (queda en la terminal; se apaga con Ctrl+C):
 
 ```bash
 cd worker
-docker build -t worker .
-docker run --rm --name worker-1 -e HOST_NAME=$(hostname) -e COORDINATOR_IP=192.168.1.100 -e WORKER_ID=worker-1 worker
-
-# Worker especializado en video que procesa 2 a la vez (PC con más núcleos):
-docker run --rm --name worker-video -e COORDINATOR_IP=192.168.1.100 \
-  -e WORKER_ID=worker-video -e WORKER_POOLS=video -e WORKER_CONCURRENCY=2 worker
+docker build -t worker .               # la primera vez, y cada vez que cambie worker.py
+docker run --rm --name worker-2 -e HOST_NAME=$(hostname) -e COORDINATOR_IP=192.168.1.100 -e WORKER_ID=worker-2 worker
 ```
 
-- `-e HOST_NAME=$(hostname)` hace que el dashboard muestre el nombre real de la computadora (sin eso, dentro de Docker se ve el ID del contenedor). El dashboard también muestra la **IP desde la que llega cada worker**, el procesador, los núcleos y la RAM: así se evidencia que cada worker corre en una máquina distinta.
-- Si el worker corre **en la misma máquina** que el coordinador, agregue `--network host` y use `COORDINATOR_IP=localhost`.
-- En Linux, si aparece `permission denied ... docker.sock`, use `sudo` o ejecute `sudo usermod -aG docker $USER` y vuelva a iniciar sesión.
+- Cambiá `192.168.1.100` por la IP del coordinador y `worker-2` por el nombre de tu worker.
+- `HOST_NAME=$(hostname)` hace que el dashboard muestre el nombre real de tu computadora.
+- **En la misma computadora del coordinador**, usá `--network host` y `COORDINATOR_IP=localhost`.
+- Si Linux dice `permission denied ... docker.sock`, poné `sudo` delante de `docker`.
 
-**Sin Docker** (requiere FFmpeg instalado):
+**Sin Docker** (necesita FFmpeg instalado):
 
 ```bash
 pip install -r worker/requirements.txt
@@ -102,58 +83,59 @@ cd worker
 COORDINATOR_IP=192.168.1.100 WORKER_ID=worker-2 python worker.py
 ```
 
-> Cada vez que cambie `worker.py` hay que reiniciar el worker y, si usa Docker, reconstruir la imagen. El dashboard marca **desactualizado** a los workers con una versión vieja.
+**Opciones del worker** (se pasan con `-e NOMBRE=valor`; no hace falta tocarlas):
+
+| Opción | Por defecto | Para qué |
+|---|---|---|
+| `WORKER_POOLS` | `video,audio,ligera` | Qué tipos de tarea atiende (los tres = hace de todo) |
+| `WORKER_CONCURRENCY` | `1` | Cuántas tareas hace a la vez |
+| `CPU_HIGH` / `CPU_LOW` | `80` / `60` | Con qué % de CPU deja de pedir trabajo y con cuánto vuelve |
+
+Si la computadora no está en la misma red que el coordinador, se pueden conectar con **Tailscale**, una red privada gratuita.
 
 ---
 
-## 3. Dataset y pruebas
-
-Hay dos formas de armar el dataset (~480 archivos en 34 casos, homogéneos y heterogéneos, con metadatos):
+## 3. Probar el sistema
 
 ```bash
-# Con archivos reales (videos, audios e imágenes de Wikimedia Commons, con licencia libre)
-python scripts/descargar_dataset.py              # → ./dataset_real  (requiere internet)
+# Armar el dataset (~480 archivos reales, ~9 GB, con 10 archivos de 400–600 MB)
+python scripts/descargar_dataset.py
 
-# Sintético, sin internet (patrones y tonos generados con FFmpeg)
-python scripts/generar_dataset.py                # → ./dataset_prueba
+# Mandar un caso
+python cliente/cliente.py enviar ./dataset_real/caso_022_heterogeneo
 
-# Un caso
-python cliente/cliente.py enviar ./dataset_prueba/caso_022_heterogeneo
+# Mandar todos, 4 a la vez, guardando tiempos para el informe
+python cliente/cliente.py carga ./dataset_real --concurrentes 4 --metricas pruebas/carga.csv
 
-# Toda la carga, 4 envíos concurrentes, con métricas para el informe
-python cliente/cliente.py carga ./dataset_prueba --concurrentes 4 --metricas pruebas/carga.csv
-
-# Generación automática de casos agrupando por metadatos
-python cliente/cliente.py auto ./dataset_prueba --por evento --metricas pruebas/por_evento.csv
-
+# Ver el estado general
 python cliente/cliente.py resumen
 ```
 
-Si el cliente corre en otra PC: `export COORDINATOR_URL=http://<IP>:8000`. Con el dataset real, reemplazar `./dataset_prueba` por `./dataset_real`.
-
-El dataset real descarga unos pocos originales (por defecto 12 videos, 20 audios y 30 imágenes) y de cada uno recorta fragmentos de distinta duración y resolución en todos los formatos: videos de 20 s a 3 min (360p a 1080p), audios de 30 s a 7 min e imágenes de hasta 4K. Además genera **10 archivos de 400–600 MB** (7 videos Full HD largos y 3 WAV de ~45 min) y un caso que mezcla 4 canciones con uno de esos videos. En total son unos 9 GB. Cada archivo conserva título, autor, licencia y enlace; la atribución queda en `dataset_real/CREDITOS.md`.
+Si el cliente corre en otra computadora: `export COORDINATOR_URL=http://<IP del coordinador>:8000`.
 
 ---
 
-## Funcionalidades principales
+## Qué incluye
 
-- **Casos heterogéneos con routing por tipo:** un video genera conversión, extracción de audio y portada. Los audios se convierten o se les extraen metadatos, y las imágenes generan miniatura. Los formatos no soportados se registran como fallidos sin ocupar un worker.
-- **Workers genéricos** sobre colas separadas por tipo de carga (`video`, `audio`, `ligera`), con **concurrencia por nodo**. Opcionalmente, un worker se puede especializar con `WORKER_POOLS`.
-- **Prioridades reales** (1–10) en RabbitMQ.
-- **Barrier/join:** un caso se cierra solo cuando todas sus sub-tareas se resolvieron (`completed`, `partially_completed`, `failed`). Otros estados del caso: `retrying` y `cancelled`.
-- **Estados por sub-tarea:** pendiente → asignada → en proceso (con **% de avance**) → completada / fallida / reintentando / cancelada.
-- **Tolerancia a fallos:** ACK después del resultado y re-entrega automática si un worker se cae (**redistribución**). Reintentos con espera ante errores transitorios. Idempotencia ante mensajes duplicados.
-- **Monitoreo:** CPU, RAM y tareas por worker; detección de desconexión; **pausa automática por saturación**; colas por pool; trazabilidad (mapa de flujo y línea de tiempo del paralelismo).
-- **Resultados y reportes:** repositorio central `results/<caso>/`, descarga desde el dashboard o el cliente, y **reporte consolidado** por caso (HTML imprimible y JSON) con resumen agregado, tiempos, workers y metadatos.
+- **Casos mezclados:** a cada archivo se le hace lo que corresponde a su tipo.
+  - **Video:** se convierte de formato, se le extrae el audio y se elige una portada.
+  - **Canción:** se buscan su álbum, fecha, género y letra en internet.
+  - **Audio:** se convierte a mp3.
+  - **Imagen:** se hace una miniatura.
+- **Reparto automático:** las tareas esperan en colas y las toma el worker que se libera primero. Los casos urgentes (prioridad alta) pasan adelante.
+- **Cierre correcto (barrier/join):** un caso se da por terminado recién cuando terminan todas sus tareas.
+- **Tolerancia a fallos:** si un worker se cae, otro retoma su tarea. Los errores de red se reintentan. Los casos se pueden cancelar.
+- **Monitoreo:** CPU, RAM y estado de cada worker, de qué computadora viene cada uno y pausa automática si una computadora se satura.
+- **Resultados y reportes:** todo se descarga desde el dashboard, y cada caso tiene un reporte con su resumen.
 
 ## Tecnologías
 
-| Componente | Tecnología |
+| Para | Se usa |
 |---|---|
-| Lenguaje | Python 3.11+ |
-| Cola de mensajes | RabbitMQ (AMQP, colas con prioridad) |
-| Base de datos | PostgreSQL 15 |
-| API + dashboard | FastAPI + HTML/JS (SVG) |
-| Procesamiento multimedia | FFmpeg / ffprobe |
-| Monitoreo de recursos | psutil |
-| Contenedores | Docker / Docker Compose |
+| Programar | Python 3.11+ |
+| Colas de tareas | RabbitMQ |
+| Base de datos | PostgreSQL |
+| Coordinador y dashboard | FastAPI + HTML/JavaScript |
+| Procesar audio y video | FFmpeg |
+| Medir CPU y RAM | psutil |
+| Contenedores | Docker |

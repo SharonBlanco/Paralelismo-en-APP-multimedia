@@ -1,169 +1,177 @@
 # Manual de usuario
 
-Este manual explica cómo usar la plataforma una vez desplegada (ver el [README](../README.md) para la instalación). Hay dos formas de usarla: el **dashboard web** y el **cliente de línea de comandos**.
+Cómo usar la plataforma una vez que está encendida (para instalarla, ver el [README](../README.md)).
+
+Se puede usar de dos formas:
+- **El dashboard**, una página web: para subir casos y mirar todo.
+- **El cliente**, un programa de terminal: para mandar muchos casos de una vez y medir tiempos.
 
 ---
 
-## 1. Dashboard web
+## 1. El dashboard
 
-Se abre en `http://<IP del coordinador>:8000` desde cualquier navegador de la red. Se actualiza solo cada 3 segundos.
+Abrilo en el navegador: `http://<IP del coordinador>:8000` (en la computadora del coordinador, `http://localhost:8000`). Se actualiza solo cada 3 segundos.
 
-### 1.1 Tarjetas generales
+Estas son sus partes, de arriba hacia abajo.
 
-En la parte superior se ven los casos totales, en proceso y completados, los workers activos (los que enviaron heartbeat en los últimos 15 s) y los **archivos procesados**. Un archivo cuenta como procesado cuando terminaron todas sus sub-tareas. Debajo se indica cuántos terminaron sin errores, cuántos con fallas y el total de sub-tareas.
+### 1.1 Tarjetas de arriba
 
-### 1.2 Colas por pool
+Totales del sistema: casos, casos en proceso, casos completados, workers conectados y **archivos procesados**. Un archivo cuenta como procesado cuando terminaron todas sus tareas.
 
-Una tarjeta por pool (`video`, `audio`, `ligera`) muestra cuántas sub-tareas **esperan** en RabbitMQ y cuántos workers lo atienden. Si hay sub-tareas esperando y ningún worker atiende ese pool, aparece **nadie atiende este pool**: hay que levantar un worker genérico o uno de ese pool.
+### 1.2 Colas
 
-### 1.3 Enviar un caso
+Una tarjeta por cola (`video`, `audio`, `ligera`) que dice **cuántas tareas están esperando** y cuántos workers las atienden. Si hay tareas esperando y dice *"nadie atiende este pool"*, falta encender un worker.
+
+### 1.3 Subir un caso
 
 En **Nuevo caso**:
 
-1. Escriba un nombre para el caso (opcional).
-2. Elija la **prioridad**: 1 = baja, 10 = alta. Las sub-tareas de un caso con más prioridad se procesan antes que las que ya esperaban.
-3. Arrastre los archivos a la zona punteada o haga clic para elegirlos. Puede mezclar videos, audios e imágenes (caso heterogéneo). Para quitar un archivo de la lista, use la **×**.
-4. Pulse **Enviar caso**. Se muestra el avance de la subida y, al terminar, el ID del caso creado.
+1. Ponele un nombre (opcional).
+2. Elegí la **prioridad**: 1 es baja y 10 es alta. Un caso con más prioridad pasa adelante de los que ya estaban esperando.
+3. Arrastrá los archivos al recuadro punteado, o hacé clic para elegirlos. Podés mezclar videos, audios e imágenes. La **×** quita un archivo de la lista.
+4. Tocá **Enviar caso**. Se ve el avance de la subida y, al final, el número del caso creado.
 
-> El selector solo ofrece los formatos soportados. Si envía otro tipo de archivo (por ejemplo, con el cliente), queda registrado como **fallido por formato no soportado** y el resto del caso se procesa normalmente.
+Si mandás un tipo de archivo que no está soportado (por ejemplo, un PDF desde el cliente), ese archivo queda marcado como **"formato no soportado"** y el resto del caso se procesa igual.
 
 ### 1.4 Workers activos
 
-Para cada worker se muestra:
+Arriba de la tabla hay un resumen, por ejemplo: *"3 workers conectados en 3 máquinas distintas"*.
 
-| Columna | Significado |
+| Columna | Qué muestra |
 |---|---|
-| Estado | **libre**, **ocupado**, **saturado** (CPU al límite: no toma tareas nuevas hasta que baje) o **desconectado** (sin heartbeat hace más de 15 s) |
-| Pools | Qué colas atiende; ×N indica cuántas sub-tareas procesa en paralelo |
-| CPU / Memoria | Último uso reportado |
-| Tareas | Sub-tareas que está procesando ahora |
-| Procesadas | Sub-tareas que terminó en total (muestra el reparto de carga) |
-| Versión | **v4** si corre la versión actual; **desactualizado** si hay que reiniciarlo o reconstruir su imagen |
+| IP | Desde qué dirección llega cada worker. Si dice *"misma máquina que el coordinador"*, corre en la misma computadora. |
+| Máquina | Nombre de la computadora, procesador, núcleos, RAM y sistema operativo |
+| Estado | **libre**, **ocupado**, **saturado** (CPU muy alta: no toma tareas nuevas por un rato) o **desconectado** (no da señales hace más de 15 s) |
+| CPU / Memoria | Cuánto está usando ahora |
+| Tareas | Cuántas está haciendo en este momento |
+| Procesadas | Cuántas terminó en total (sirve para ver cómo se repartió el trabajo) |
+| Versión | **v4** si está actualizado; **desactualizado** si hay que reiniciarlo |
 
-Los workers desconectados quedan en gris al final y se pueden quitar de la lista con **Quitar**.
+Los desconectados quedan en gris al final, y se pueden sacar de la lista con **Quitar**.
 
-### 1.5 Casos de procesamiento
+### 1.5 Casos
 
-Cada fila muestra el estado agregado del caso, una barra de progreso y el desglose de sub-tareas: en espera, en ejecución, completadas, fallidas y canceladas.
+Cada fila es un caso, con su estado, una barra de avance y cuántas tareas hay en espera, en ejecución, completadas o fallidas.
 
-| Estado | Significado |
+| Estado | Significa |
 |---|---|
-| en cola | se está registrando |
-| en proceso | hay sub-tareas sin terminar |
-| reintentando | hay sub-tareas esperando un reintento tras un error de red |
-| completado | todo salió bien |
-| parcialmente completado | terminó con al menos una sub-tarea fallida |
-| fallido | ninguna sub-tarea tuvo éxito |
+| en cola / en proceso | todavía se está trabajando |
+| reintentando | alguna tarea falló por la red y se va a volver a intentar |
+| **completado** | todo salió bien |
+| **parcialmente completado** | terminó, pero alguna tarea falló |
+| **fallido** | no salió bien ninguna tarea |
 | cancelado | se canceló |
 
-Acciones:
+Botones:
+- **Clic en la fila:** abre el detalle del caso.
+- **Cancelar** (solo si no terminó): las tareas que faltan ya no se hacen.
+- **Eliminar:** borra el caso y todos sus archivos. **No se puede deshacer.**
 
-- **Clic en la fila:** abre el detalle del caso (ver 1.6) y enfoca la trazabilidad en él.
-- **Cancelar** (solo casos sin terminar): las sub-tareas pendientes ya no se procesan. Las que estaban en ejecución terminan, pero su resultado se descarta.
-- **Eliminar:** borra el caso, sus sub-tareas, sus archivos originales y sus resultados. No se puede deshacer.
+### 1.6 Detalle de un caso
 
-### 1.6 Detalle del caso
+Arriba aparece el **resumen en una línea**, por ejemplo: *"De 15 archivos — 6 miniaturas generadas, 4 audios convertidos…; 1 fallido por formato no soportado"*.
 
-Muestra el **resumen agregado** (por ejemplo: "De 15 archivos (6 audios, 6 imágenes, 3 videos) — 6 miniaturas generadas, 4 audios convertidos, …; 1 fallido (1 por formato no soportado)") y la tabla de sub-tareas con su operación, pool, estado con % de avance, worker, duración y resultado:
-
+Debajo está la tabla con cada tarea: qué operación es, su estado (con % mientras avanza), qué worker la hizo y cuánto tardó. En la columna **Resultado**:
 - **Descargar:** baja el archivo resultante.
-- **Ver error:** pase el mouse para leer el motivo del fallo.
-- "N reintento(s)" indica reintentos y "redistribuida" indica que la sub-tarea pasó a otro worker porque el anterior se cayó.
+- **Ver error:** pasá el mouse para leer por qué falló.
+- Una nota pequeña con información extra: en qué segundo se tomó la portada, el álbum encontrado, o el tamaño antes y después de convertir.
 
 Botones:
-
-- **Ver reporte consolidado:** abre el reporte del caso en una pestaña nueva, con el botón **Imprimir / PDF**.
-- **Descargar JSON:** el mismo reporte en formato JSON.
+- **Ver reporte consolidado:** abre el reporte completo del caso, que se puede imprimir o guardar como PDF.
+- **Descargar JSON:** el mismo reporte, en formato de datos.
 
 ### 1.7 Variedad de archivos recibidos
 
-Resume todos los archivos enviados al sistema, para mostrar la variedad del dataset:
+Gráficos de todos los archivos que llegaron al sistema:
+- **Archivos por tipo:** cuántos videos, audios e imágenes hay, y cuánto pesan.
+- **Formatos:** cuántos de cada extensión (MP4, MKV, MP3, WAV, PNG…).
+- **Distribución de tamaños:** cuántos archivos hay en cada rango, desde menos de 1 MB hasta más de 600 MB. Debajo dice cuánto pesan los archivos de más de 200 MB.
 
-- **Resumen:** cantidad de archivos, volumen total, formatos distintos y tamaño mínimo, mediano y máximo.
-- **Archivos por tipo:** cantidad y volumen de video, audio, imagen y otros.
-- **Formatos:** cuántos archivos hay de cada extensión, con el color de su tipo.
-- **Distribución de tamaños:** cuántos archivos caen en cada rango (menos de 100 KB, 100 KB a 1 MB, 1 a 10 MB, 10 a 50 MB, más de 50 MB), separados por tipo.
-
-Al pasar el mouse sobre una barra se ve el detalle, y **Ver datos en tabla** muestra los mismos números en una tabla.
+**Ver datos en tabla** muestra los mismos números en una tabla.
 
 ### 1.8 Trazabilidad
 
-- **Selector de caso:** últimos 5 casos o uno en particular.
-- **Resumen:** workers que participaron, máximo de sub-tareas en paralelo, tiempo real, tiempo si fuera secuencial y **aceleración (speedup)**.
-- **Mapa de flujo:** caso → archivo → sub-tarea → worker, con un color por worker. Al pasar el mouse sobre un nodo se resalta su recorrido. Las líneas animadas son sub-tareas en ejecución y las punteadas, sub-tareas en cola.
-- **Línea de tiempo por worker:** una fila por worker y una barra por sub-tarea. Las barras superpuestas en vertical son sub-tareas que corrieron al mismo tiempo. Al mover el mouse se ve qué se ejecutaba en cada instante.
+Muestra **qué worker hizo cada cosa**:
+- **Mapa de flujo:** caso → archivo → tarea → worker, con un color por worker. Al pasar el mouse sobre un elemento se resalta su recorrido.
+- **Línea de tiempo:** una fila por worker y una barra por tarea. **Las barras que se superponen corrieron al mismo tiempo**: ahí se ve el paralelismo.
+- **Resumen:** cuánto tardó todo, cuánto habría tardado haciendo una cosa por vez, y la **aceleración** lograda (speedup).
 
 ---
 
-## 2. Cliente de línea de comandos
+## 2. El cliente (terminal)
 
-Desde la carpeta del proyecto, con el entorno virtual activo. Si el coordinador está en otra máquina:
+Se corre desde la carpeta del proyecto, con el entorno activado (`source .venv/bin/activate`). Si el coordinador está en otra computadora, primero:
 
 ```bash
 export COORDINATOR_URL=http://192.168.1.100:8000
 ```
 
-| Comando | Qué hace |
+| Para… | Comando |
 |---|---|
-| `python cliente/cliente.py enviar <carpeta> [--prioridad N] [--nombre X]` | Envía todos los archivos de la carpeta como un caso, con su `metadata.json` si existe |
-| `python cliente/cliente.py carga <dataset> --concurrentes 5 --esperar` | Envía cada sub-carpeta como un caso, 5 envíos a la vez, y espera a que terminen |
-| `python cliente/cliente.py auto <dataset> --por evento` | **Generación automática:** agrupa los archivos del catálogo por `evento`, `sesion`, `usuario`, `lote` o `carpeta` y envía un caso por grupo |
-| `... --metricas pruebas/archivo.csv` | Con `carga` o `auto`: al terminar guarda métricas por caso (CSV) y un resumen (JSON) |
-| `... --prioridad-aleatoria` / `--max-casos N` | Prioridad al azar por caso / enviar solo los primeros N |
-| `python cliente/cliente.py estado <case-id>` | Estado del caso, sub-tareas y resumen |
-| `python cliente/cliente.py esperar <case-id> ...` | Espera a que terminen uno o varios casos |
-| `python cliente/cliente.py resultados <case-id> --salida ./carpeta` | Descarga el reporte consolidado y todos los resultados del caso |
-| `python cliente/cliente.py cancelar <case-id>` | Cancela un caso |
-| `python cliente/cliente.py resumen` | Estado del sistema: casos, sub-tareas, colas y workers |
+| Mandar una carpeta como un caso | `python cliente/cliente.py enviar ./dataset_real/caso_022_heterogeneo` |
+| Mandar todo el dataset (cada carpeta es un caso) | `python cliente/cliente.py carga ./dataset_real --concurrentes 4 --metricas pruebas/carga.csv` |
+| Mandar solo algunos casos | agregar `--filtro heterogeneo` (los que tengan esa palabra en el nombre) o `--max-casos 5` |
+| Armar casos automáticamente por evento | `python cliente/cliente.py auto ./dataset_real --por evento` (también `sesion`, `usuario` o `lote`) |
+| Ver cómo va un caso | `python cliente/cliente.py estado case-xxxxxxxx` |
+| Bajar todos los resultados de un caso | `python cliente/cliente.py resultados case-xxxxxxxx --salida ./resultados_descargados` |
+| Cancelar un caso | `python cliente/cliente.py cancelar case-xxxxxxxx` |
+| Ver el estado general | `python cliente/cliente.py resumen` |
 
-Ejemplo de salida de `--metricas`:
+Con `--metricas`, el cliente **espera a que termine todo** y muestra un resumen como este:
 
 ```
 MÉTRICAS DE LA PRUEBA
 Casos: 34  {'completed': 30, 'partially_completed': 4}
 Archivos: 480 · Sub-tareas: 560
-Tiempo total: 412.3 s (envío 18.2 s)
+Tiempo total: 412.3 s
 Rendimiento: 69.8 archivos/min
 Tiempo secuencial estimado: 1103.5 s → speedup global 2.68×
 Reparto por worker:
-  worker-1    210 sub-tareas (37.5%) · ocupado 402.1 s · fallidas 2
-  ...
+  worker-1    210 sub-tareas (37.5%) · ...
 ```
 
-*(Los números son ilustrativos: dependen del equipo y la red.)*
+*(Números de ejemplo.)* Los datos quedan guardados en un `.csv` y un `.json` dentro de `pruebas/`, para el informe.
 
 ---
 
-## 3. Dataset de prueba
+## 3. Armar el dataset de prueba
 
-**Con archivos reales (recomendado):**
-
-```bash
-python scripts/descargar_dataset.py                 # ~480 archivos en ./dataset_real
-python scripts/descargar_dataset.py --escala 0.2    # versión chica para probar
-```
-
-Ocupa unos 9 GB e incluye 10 archivos de 400–600 MB (7 videos Full HD largos y 3 WAV de ~45 min), más un caso con 4 canciones y uno de esos videos. Con `--muy-pesados 0` no se generan; con `--ligero` todos los archivos son chicos, para probar rápido.
-
-Busca en Wikimedia Commons videos de conciertos, festivales y desfiles, audios de piano, orquesta y coros, e imágenes de graduaciones, campus y escenarios, todos con licencia libre. A partir de esos originales recorta fragmentos livianos, medianos y pesados y los exporta a todos los formatos soportados. Los metadatos de cada archivo incluyen el título, autor, licencia y enlace reales, y `CREDITOS.md` lista la atribución que piden las licencias. Los originales quedan en `dataset_real/_originales/` y no se vuelven a descargar si se corre el script de nuevo con `--limpiar`.
-
-**Sintético, sin internet:**
+**Con archivos reales** (recomendado; necesita internet):
 
 ```bash
-python scripts/generar_dataset.py                 # ~480 archivos en ./dataset_prueba
+python scripts/descargar_dataset.py
 ```
 
-Los dos generan la misma estructura de casos: homogéneos (solo audio a convertir, solo mp3, solo video, solo imágenes) y heterogéneos (audio + video + imágenes y, en algunos, un archivo no soportado o corrupto). Cada caso trae un `metadata.json`. En la raíz quedan `catalogo.json` (todos los archivos con sus metadatos, usado por `cliente.py auto`) y `composicion.json` (cantidades por tipo y tamaño, y volumen total).
+- Baja videos, canciones y fotos reales de Wikimedia Commons, todos de uso libre.
+- A partir de ellos arma **~480 archivos** en casos homogéneos (todos del mismo tipo) y heterogéneos (mezclados), con tamaños livianos, medianos, pesados y **10 archivos de 400–600 MB**.
+- Ocupa unos 9 GB y queda en `dataset_real/`.
+- Los créditos de cada original quedan en `dataset_real/CREDITOS.md`.
+
+Opciones útiles:
+
+| Opción | Para qué |
+|---|---|
+| `--limpiar` | Volver a generar todo (reutiliza lo ya descargado) |
+| `--pesados-desde 22` | Conservar los casos 1 a 21 y rehacer del 22 en adelante como casos heterogéneos de solo archivos pesados |
+| `--muy-pesados 0` | No generar los archivos de 400–600 MB |
+| `--ligero` | Archivos chicos, para probar rápido |
+
+**Sin internet** (archivos sintéticos: patrones de colores y tonos):
+
+```bash
+python scripts/generar_dataset.py
+```
 
 ---
 
 ## 4. Problemas frecuentes
 
-| Síntoma | Causa / solución |
+| Qué pasa | Qué hacer |
 |---|---|
-| Todas las sub-tareas fallan con `Error opening input file uploads/...` | El worker corre una versión vieja. Reinícielo o reconstruya su imagen (`docker build -t worker .`). La columna **Versión** lo indica. |
-| Un worker aparece conectado pero no se ve en ninguna terminal | Se lanzó con `docker run -d` (segundo plano). Véalo con `docker ps` y deténgalo con `docker stop <nombre>`. |
-| Sub-tareas esperando en un pool y nadie las toma | Ningún worker atiende ese pool. Levante uno con `WORKER_POOLS` que lo incluya, o uno genérico. |
-| Un worker queda **saturado** mucho tiempo | La PC está ocupada con otra cosa o el umbral es bajo. Ajuste `CPU_HIGH` y `CPU_LOW`. |
-| `permission denied ... docker.sock` | El usuario no está en el grupo `docker`: use `sudo` o ejecute `sudo usermod -aG docker $USER` y vuelva a iniciar sesión. |
-| Las horas se ven corridas | Reinicie el coordinador: convierte las horas de la BD (UTC) a la hora local. |
+| Todas las tareas fallan con `Error opening input file uploads/...` | El worker es una versión vieja. Reinicialo y, si usa Docker, reconstruí la imagen (`docker build -t worker .`). |
+| Un worker aparece conectado pero no lo ves en ninguna terminal | Está corriendo en segundo plano. Buscalo con `docker ps` y detenelo con `docker stop <nombre>`. |
+| Hay tareas esperando y nadie las toma | No hay ningún worker encendido para esa cola. Encendé uno. |
+| Un worker queda **saturado** mucho rato | Esa computadora está ocupada con otra cosa. Se libera solo cuando baja el uso de CPU. |
+| `permission denied ... docker.sock` | Usá `sudo` delante de `docker`. |
+| Al mandar casos grandes da "400 Bad Request" | El coordinador es una versión vieja: reinicialo. |
+| Las horas se ven corridas | Reiniciá el coordinador. |

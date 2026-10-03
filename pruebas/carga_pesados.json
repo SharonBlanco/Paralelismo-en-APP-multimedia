@@ -1,42 +1,42 @@
 {
-  "fecha": "2026-10-03T09:55:37",
+  "fecha": "2026-10-03T14:13:02",
   "coordinador": "http://localhost:8000",
   "envios_concurrentes": 3,
-  "casos": 14,
+  "casos": 15,
   "estados": {
-    "completed": 14
+    "completed": 15
   },
-  "archivos": 136,
-  "sub_tareas": 178,
-  "tiempo_envio_s": 82.1,
-  "tiempo_total_s": 926.1,
-  "rendimiento_archivos_por_min": 8.8,
-  "tiempo_secuencial_estimado_s": 1436.6,
-  "speedup_global": 1.55,
-  "duracion_media_caso_s": 625.1,
+  "archivos": 142,
+  "sub_tareas": 192,
+  "tiempo_envio_s": 196.3,
+  "tiempo_total_s": 1655.4,
+  "rendimiento_archivos_por_min": 5.1,
+  "tiempo_secuencial_estimado_s": 1939.2,
+  "speedup_global": 1.17,
+  "duracion_media_caso_s": 1034.9,
   "reintentos": 0,
-  "redistribuciones": 0,
+  "redistribuciones": 1,
   "por_worker": {
     "worker-1": {
-      "subtasks": 151,
-      "completed": 151,
+      "subtasks": 159,
+      "completed": 159,
       "failed": 0,
-      "busy_seconds": 863.6,
-      "porcentaje_subtareas": 84.8
+      "busy_seconds": 1423.8,
+      "porcentaje_subtareas": 82.8
     },
     "worker-2": {
+      "subtasks": 17,
+      "completed": 17,
+      "failed": 0,
+      "busy_seconds": 468.1,
+      "porcentaje_subtareas": 8.9
+    },
+    "worker-3": {
       "subtasks": 16,
       "completed": 16,
       "failed": 0,
-      "busy_seconds": 358.2,
-      "porcentaje_subtareas": 9.0
-    },
-    "worker-3": {
-      "subtasks": 11,
-      "completed": 11,
-      "failed": 0,
-      "busy_seconds": 214.8,
-      "porcentaje_subtareas": 6.2
+      "busy_seconds": 47.3,
+      "porcentaje_subtareas": 8.3
     }
   }
 }
