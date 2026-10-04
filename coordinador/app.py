@@ -55,7 +55,7 @@ PG_PASS = os.getenv("PG_PASS", "admin123")
 
 # Versión de worker esperada (debe coincidir con WORKER_VERSION en worker.py).
 # Los workers viejos no la envían y se marcan como desactualizados.
-WORKER_VERSION = 4
+WORKER_VERSION = 5
 worker_versions = {}  # worker_id -> versión reportada en el último heartbeat
 
 # Un worker manda heartbeat cada ~6 s; sin noticias en este tiempo → desconectado
@@ -420,6 +420,8 @@ def refresh_case_status(cur, case_id: str):
                 (c["ok"], c["bad"], case_id))
 
     if c["ok"] + c["bad"] < c["total"]:
+        if case["status"] == "paused":
+            return None                      # sigue en pausa hasta que el usuario lo reanude
         new_status = "retrying" if c["retrying"] else "processing"
         cur.execute("UPDATE cases SET status=%s WHERE case_id=%s", (new_status, case_id))
         return None
@@ -450,6 +452,26 @@ def republish_subtask(st: dict, priority: int):
         rabbit.close()
     except Exception as e:
         print(f"  [!] No se pudo re-encolar {st['subtask_id']}: {e}")
+
+
+def requeue_paused(cur, case_id: str, priority: int) -> int:
+    """
+    Vuelve a encolar las sub-tareas en pausa de un caso. Solo las 'paused':
+    las que siguen 'pending' todavía tienen su mensaje en RabbitMQ.
+    """
+    cur.execute("""
+        UPDATE subtasks SET status='pending' WHERE case_id=%s AND status='paused'
+        RETURNING subtask_id, case_id, file_name, file_path, file_type, operation, target_format, pool
+    """, (case_id,))
+    filas = cur.fetchall()
+    if filas:
+        rabbit = get_rabbit()
+        channel = rabbit.channel()
+        declare_queues(channel)
+        for st in filas:
+            publish_subtask(channel, dict(st), priority)
+        rabbit.close()
+    return len(filas)
 
 
 def handle_worker_message(cur, msg: dict):
@@ -489,6 +511,20 @@ def handle_worker_message(cur, msg: dict):
             UPDATE subtasks SET status='processing', assigned_worker=%s, started_at=NOW()
             WHERE subtask_id=%s
         """, (worker_id, subtask_id))
+        return None
+
+    if status == "paused":
+        # El worker tomó una sub-tarea de un caso en pausa y la devolvió sin
+        # procesarla: queda "en pausa" hasta que el caso se reanude.
+        cur.execute("""
+            UPDATE subtasks SET status='paused', assigned_worker=NULL, started_at=NULL, progress=0
+            WHERE subtask_id=%s
+        """, (subtask_id,))
+        cur.execute("SELECT status, priority FROM cases WHERE case_id=%s", (st["case_id"],))
+        case = cur.fetchone()
+        if case and case["status"] != "paused":
+            # Se reanudó mientras este aviso viajaba: re-encolar ya
+            requeue_paused(cur, st["case_id"], case["priority"])
         return None
 
     if status == "cancelled":
@@ -588,7 +624,8 @@ def list_cases():
                COUNT(s.*) FILTER (WHERE s.status IN ('assigned', 'processing')) AS n_running,
                COUNT(s.*) FILTER (WHERE s.status = 'completed')                 AS n_completed,
                COUNT(s.*) FILTER (WHERE s.status = 'failed')                    AS n_failed,
-               COUNT(s.*) FILTER (WHERE s.status = 'cancelled')                 AS n_cancelled
+               COUNT(s.*) FILTER (WHERE s.status = 'cancelled')                 AS n_cancelled,
+               COUNT(s.*) FILTER (WHERE s.status = 'paused')                    AS n_paused
         FROM cases c LEFT JOIN subtasks s ON s.case_id = c.case_id
         GROUP BY c.case_id ORDER BY c.created_at DESC
     """)
@@ -798,6 +835,56 @@ async def subtask_progress(subtask_id: str, request: Request):
     return {"ok": True}
 
 
+@app.post("/api/cases/{case_id}/pause")
+def pause_case(case_id: str):
+    """
+    Pausa un caso: las sub-tareas que ya se están procesando terminan, pero
+    las que esperan no arrancan. Si un worker toma una de la cola, el
+    coordinador le responde 423 y el worker la devuelve sin procesarla.
+    """
+    db = get_db()
+    cur = db.cursor()
+    cur.execute("SELECT status FROM cases WHERE case_id=%s FOR UPDATE", (case_id,))
+    case = cur.fetchone()
+    if not case:
+        cur.close(); db.close()
+        return JSONResponse({"error": "Caso no encontrado"}, 404)
+    if case["status"] not in ("queued", "processing", "retrying"):
+        cur.close(); db.close()
+        return JSONResponse({"error": f"No se puede pausar un caso {case['status']}"}, 409)
+    cur.execute("UPDATE cases SET status='paused' WHERE case_id=%s", (case_id,))
+    db.commit()
+    cur.close()
+    db.close()
+    print(f"  [||] Caso {case_id} en pausa")
+    return {"paused": case_id}
+
+
+@app.post("/api/cases/{case_id}/resume")
+def resume_case(case_id: str):
+    """Reanuda un caso en pausa: sus sub-tareas pausadas vuelven a la cola"""
+    db = get_db()
+    cur = db.cursor()
+    cur.execute("SELECT status, priority FROM cases WHERE case_id=%s FOR UPDATE", (case_id,))
+    case = cur.fetchone()
+    if not case:
+        cur.close(); db.close()
+        return JSONResponse({"error": "Caso no encontrado"}, 404)
+    if case["status"] != "paused":
+        cur.close(); db.close()
+        return JSONResponse({"error": "El caso no está en pausa"}, 409)
+    cur.execute("UPDATE cases SET status='processing' WHERE case_id=%s", (case_id,))
+    reencoladas = requeue_paused(cur, case_id, case["priority"])
+    final = refresh_case_status(cur, case_id)          # por si ya no quedaba nada pendiente
+    db.commit()
+    cur.close()
+    db.close()
+    if final:
+        save_report_safe(case_id)
+    print(f"  [>] Caso {case_id} reanudado ({reencoladas} sub-tareas vuelven a la cola)")
+    return {"resumed": case_id, "requeued": reencoladas}
+
+
 @app.post("/api/cases/{case_id}/cancel")
 def cancel_case(case_id: str):
     """
@@ -842,6 +929,8 @@ def download_input(case_id: str, file_name: str):
     db.close()
     if case and case["status"] == "cancelled":
         return JSONResponse({"error": "Caso cancelado"}, 410)
+    if case and case["status"] == "paused":
+        return JSONResponse({"error": "Caso en pausa"}, 423)
     path = UPLOAD_DIR / case_id / file_name
     if not _inside(UPLOAD_DIR, path) or not path.is_file():
         return JSONResponse({"error": "Archivo no encontrado"}, 404)
@@ -931,7 +1020,7 @@ STATUS_LABELS = {
     "queued": "en cola", "processing": "en proceso", "completed": "completado",
     "partially_completed": "parcialmente completado", "failed": "fallido",
     "pending": "pendiente", "assigned": "asignada", "retrying": "reintentando",
-    "cancelled": "cancelado",
+    "cancelled": "cancelado", "paused": "en pausa",
 }
 # Metadatos de archivo que se muestran en el reporte (si vienen en el caso)
 META_FIELDS = ["titulo", "artista", "album", "evento", "sesion", "usuario", "lote", "descripcion"]
@@ -1316,7 +1405,7 @@ REPORT_TEMPLATE = """<!DOCTYPE html>
     .status { padding:1px 7px; border-radius:4px; font-size:0.9em; white-space:nowrap; }
     .status.completed { background:#ccfbf1; color:#0f766e; } .status.failed { background:#fee2e2; color:#b91c1c; }
     .status.processing, .status.assigned { background:#cffafe; color:#0e7490; } .status.pending { background:#e2e8f0; color:#475569; }
-    .status.retrying, .status.partially_completed { background:#fef3c7; color:#b45309; } .status.cancelled { background:#e2e8f0; color:#64748b; }
+    .status.retrying, .status.partially_completed, .status.paused { background:#fef3c7; color:#b45309; } .status.cancelled { background:#e2e8f0; color:#64748b; }
     .note { margin-top:10px; background:#fef3c7; color:#92400e; border-radius:8px; padding:8px 12px; font-size:0.9em; }
     ul { margin-left:20px; }
     footer { margin-top:20px; color:var(--muted); font-size:0.8em; }
@@ -1601,7 +1690,7 @@ def dashboard():
             .status.processing, .status.busy { background:#cffafe; color:#0e7490; }
             .status.failed { background:#fee2e2; color:#b91c1c; }
             .status.queued, .status.pending { background:#e2e8f0; color:#475569; }
-            .status.partially_completed, .status.retrying, .status.saturated { background:#fef3c7; color:#b45309; }
+            .status.partially_completed, .status.retrying, .status.saturated, .status.paused { background:#fef3c7; color:#b45309; }
             .status.assigned { background:#e0f2fe; color:#0369a1; }
             .status.cancelled { background:#e2e8f0; color:#64748b; }
             #cases-table td:first-child, #workers-table td:first-child { white-space:nowrap; }
@@ -1612,6 +1701,8 @@ def dashboard():
             .queue .bar div { background:linear-gradient(90deg,var(--accent),var(--primary)); height:100%; }
             .btn-cancel { background:none; border:1px solid #fde68a; color:#b45309; border-radius:6px; padding:3px 10px; font:inherit; font-size:0.85em; cursor:pointer; margin-right:4px; }
             .btn-cancel:hover { background:#fef3c7; }
+            .btn-pause { background:none; border:1px solid var(--border); color:var(--primary-dark); border-radius:6px; padding:3px 10px; font:inherit; font-size:0.85em; cursor:pointer; margin-right:4px; }
+            .btn-pause:hover { background:var(--soft); }
             .progress-bar { background:var(--soft); border-radius:4px; height:8px; overflow:hidden; display:inline-block; width:100px; vertical-align:middle; }
             .progress-fill { background:linear-gradient(90deg,var(--accent),var(--primary)); height:100%; transition:width 0.3s; }
 
@@ -1969,6 +2060,10 @@ def dashboard():
                         <td>${c.priority}</td>
                         <td>${c.created_at ? new Date(c.created_at).toLocaleString() : ''}</td>
                         <td style="white-space:nowrap">${['queued', 'processing', 'retrying'].includes(c.status)
+                            ? `<button class="btn-pause" title="Pausar: lo que está corriendo termina, lo demás espera" onclick="event.stopPropagation(); pauseCase(this, '${c.case_id}', 'pause')">Pausar</button>` : ''}${
+                            c.status === 'paused'
+                            ? `<button class="btn-pause" title="Reanudar el caso" onclick="event.stopPropagation(); pauseCase(this, '${c.case_id}', 'resume')">Reanudar</button>` : ''}${
+                            ['queued', 'processing', 'retrying', 'paused'].includes(c.status)
                             ? `<button class="btn-cancel" title="Cancelar caso" onclick="event.stopPropagation(); cancelCase(this, '${c.case_id}')">Cancelar</button>` : ''}<button class="btn-del" title="Eliminar caso"
                             onclick="event.stopPropagation(); deleteCase(this, '${c.case_id}')">Eliminar</button></td>
                     </tr>`;
@@ -2028,13 +2123,13 @@ def dashboard():
             function caseBreakdown(c) {
                 return [[c.n_waiting, 'en espera', 'en espera'], [c.n_running, 'en ejecución', 'en ejecución'],
                         [c.n_completed, 'completada', 'completadas'], [c.n_failed, 'fallida', 'fallidas'],
-                        [c.n_cancelled, 'cancelada', 'canceladas']]
+                        [c.n_paused, 'en pausa', 'en pausa'], [c.n_cancelled, 'cancelada', 'canceladas']]
                     .filter(([n]) => n > 0).map(([n, s, p]) => `${n} ${n === 1 ? s : p}`).join(' · ');
             }
 
             const WORKER_STATUS = { idle: 'libre', busy: 'ocupado', offline: 'desconectado', saturated: 'saturado' };
             const CASE_STATUS = {
-                queued: 'en cola', processing: 'en proceso', retrying: 'reintentando', completed: 'completado',
+                queued: 'en cola', processing: 'en proceso', retrying: 'reintentando', paused: 'en pausa', completed: 'completado',
                 partially_completed: 'parcialmente completado', failed: 'fallido', cancelled: 'cancelado'
             };
             const POOL_DESC = { video: 'transcodificación (CPU intensivo)', audio: 'conversión de audio', ligera: 'miniaturas y metadatos' };
@@ -2085,6 +2180,14 @@ def dashboard():
                 document.getElementById('trace-case').value = caseId;
                 traceKey = '';
                 refreshTrace();
+            }
+
+            async function pauseCase(btn, caseId, accion) {
+                btn.disabled = true;
+                const r = await fetch(`/api/cases/${caseId}/${accion}`, { method: 'POST' });
+                if (!r.ok) alert('No se pudo ' + (accion === 'pause' ? 'pausar' : 'reanudar') + ': ' + (await r.text()));
+                traceKey = '';
+                refresh();
             }
 
             async function cancelCase(btn, caseId) {
@@ -2256,7 +2359,7 @@ def dashboard():
             };
             OP_LABEL.generate_thumbnail_video = 'Portada';
             const STATUS_LABEL = { completed: 'completada', failed: 'fallida', processing: 'en proceso', assigned: 'asignada',
-                                   pending: 'en cola', retrying: 'reintentando', cancelled: 'cancelada' };
+                                   pending: 'en cola', retrying: 'reintentando', cancelled: 'cancelada', paused: 'en pausa' };
             const QUEUE = '__cola__';
             const tooltip = document.getElementById('tooltip');
 

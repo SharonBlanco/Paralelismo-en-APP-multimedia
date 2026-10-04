@@ -17,6 +17,8 @@ Uso:
   python cliente/cliente.py esperar case-abc12345 case-def67890
   python cliente/cliente.py resultados case-abc12345 --salida ./resultados
   python cliente/cliente.py cancelar case-abc12345
+  python cliente/cliente.py pausar case-abc12345
+  python cliente/cliente.py reanudar case-abc12345
   python cliente/cliente.py resumen
 
 El coordinador se toma de COORDINATOR_URL (por defecto http://localhost:8000).
@@ -333,6 +335,12 @@ def descargar_resultados(case_id: str, salida: str):
     print(f"    {rep['summary']}")
 
 
+def pausar(case_id: str, reanudar=False):
+    accion = "resume" if reanudar else "pause"
+    r = requests.post(f"{COORDINATOR_URL}/api/cases/{case_id}/{accion}", timeout=30)
+    print(("[✓] " if r.ok else "[✗] ") + r.text)
+
+
 def cancelar(case_id: str):
     r = requests.post(f"{COORDINATOR_URL}/api/cases/{case_id}/cancel", timeout=30)
     print(("[✓] " if r.ok else "[✗] ") + r.text)
@@ -392,6 +400,10 @@ if __name__ == "__main__":
     p.add_argument("--salida", default="./resultados_descargados")
     p = sub.add_parser("cancelar", help="Cancelar un caso")
     p.add_argument("case_id")
+    p = sub.add_parser("pausar", help="Pausar un caso (lo que está corriendo termina; lo demás espera)")
+    p.add_argument("case_id")
+    p = sub.add_parser("reanudar", help="Reanudar un caso en pausa")
+    p.add_argument("case_id")
     sub.add_parser("resumen", help="Resumen del sistema")
 
     args = parser.parse_args()
@@ -414,6 +426,8 @@ if __name__ == "__main__":
         descargar_resultados(args.case_id, args.salida)
     elif args.comando == "cancelar":
         cancelar(args.case_id)
+    elif args.comando in ("pausar", "reanudar"):
+        pausar(args.case_id, reanudar=args.comando == "reanudar")
     elif args.comando == "resumen":
         resumen()
     else:

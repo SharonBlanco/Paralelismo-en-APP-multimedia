@@ -70,7 +70,7 @@ RESULTS_QUEUE = f"{QUEUE_PREFIX}results"
 QUEUE_ARGS    = {"x-max-priority": 10}   # cola con prioridades (1 = baja, 10 = alta)
 
 # Versión del worker: el coordinador avisa si un worker está desactualizado
-WORKER_VERSION = 4
+WORKER_VERSION = 5
 
 # Carpeta local de trabajo
 WORK_DIR = Path("./workspace")
@@ -91,6 +91,10 @@ class Cancelled(Exception):
     """El coordinador avisó que el caso fue cancelado"""
 
 
+class Paused(Exception):
+    """El coordinador avisó que el caso está en pausa"""
+
+
 # ============================================================
 # TRANSFERENCIA DE ARCHIVOS CON EL COORDINADOR (HTTP)
 # El worker corre en otra PC/contenedor: no ve el disco del
@@ -107,6 +111,8 @@ def download_input(subtask: dict) -> Path:
     with requests.get(url, stream=True, timeout=60) as r:
         if r.status_code == 410:
             raise Cancelled()
+        if r.status_code == 423:
+            raise Paused()
         r.raise_for_status()
         with open(local_path, "wb") as fp:
             for chunk in r.iter_content(chunk_size=1024 * 1024):
@@ -520,6 +526,10 @@ def process_subtask(subtask: dict, notify) -> dict:
     except Cancelled:
         result["status"] = "cancelled"
         print(f"    [⊘] Cancelada: {file_name} (el caso fue cancelado)")
+    except Paused:
+        # Se devuelve sin procesar; el coordinador la re-encola al reanudar
+        result["status"] = "paused"
+        print(f"    [||] En pausa: {file_name} (se procesará cuando se reanude el caso)")
     except subprocess.CalledProcessError as e:
         # Error del archivo (corrupto, códec): reintentar no ayuda
         result["status"] = "failed"

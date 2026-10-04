@@ -213,6 +213,7 @@ Cada caso tiene una prioridad de **1 (baja) a 10 (alta)**. Las colas de RabbitMQ
 | completada | terminó bien |
 | fallida | no se pudo (archivo dañado, formato no soportado…) |
 | reintentando | falló por un problema pasajero (por ejemplo, de red) y se va a volver a intentar |
+| en pausa | el caso está pausado: la tarea espera a que se reanude |
 | cancelada | el usuario canceló el caso |
 
 ```mermaid
@@ -236,6 +237,7 @@ stateDiagram-v2
 | en cola | se acaba de registrar |
 | en proceso | todavía hay sub-tareas sin terminar |
 | reintentando | hay sub-tareas sin terminar y al menos una esperando reintento |
+| en pausa | el usuario lo pausó: lo que estaba corriendo termina y lo demás espera |
 | **completado** | terminaron todas y **todas salieron bien** |
 | **parcialmente completado** | terminaron todas y **alguna falló** |
 | **fallido** | terminaron todas y **ninguna salió bien** |
@@ -264,6 +266,7 @@ Cada vez que llega un aviso de un worker, el coordinador:
 | **El archivo está dañado** | Falla definitivamente: reintentar no lo arreglaría. |
 | **Llega un aviso repetido** | Se ignora. |
 | **El usuario cancela** un caso | Lo que no empezó ya no se procesa. El worker que tome una de esas tareas recibe "caso cancelado" y la descarta. |
+| **El usuario pausa** un caso | Lo que ya está corriendo termina. Si un worker toma una tarea de ese caso, el coordinador le responde "caso en pausa" y el worker la devuelve sin procesarla, así queda libre para otros casos. Al **reanudar**, el coordinador vuelve a poner en la cola solo esas tareas devueltas; las que nunca salieron de la cola siguen ahí, así que ninguna se procesa dos veces. |
 | **Un worker deja de mandar heartbeat** por 15 s | Aparece como **desconectado**. |
 | **Tareas muy largas** (videos de 500 MB) | RabbitMQ, por defecto, devuelve a la cola cualquier tarea que tarde más de 30 minutos. El coordinador sube ese límite a 4 horas al arrancar, para que las conversiones largas no se repitan. |
 | **Archivos muy grandes** | Viajan **por partes** (de a 1 MB), nunca enteros en memoria, para no saturar la RAM. |
@@ -374,6 +377,7 @@ El coordinador ofrece estas direcciones. La documentación interactiva está en 
 | POST | `/api/cases` | Enviar un caso (archivos, nombre, prioridad 1–10 y metadatos opcionales) |
 | GET | `/api/cases` | Listar los casos |
 | GET | `/api/cases/{id}` | Ver un caso y sus sub-tareas |
+| POST | `/api/cases/{id}/pause` · `/api/cases/{id}/resume` | Pausar / reanudar un caso |
 | POST | `/api/cases/{id}/cancel` | Cancelar un caso |
 | DELETE | `/api/cases/{id}` | Borrar un caso y sus archivos |
 | GET | `/api/cases/{id}/report` | Reporte en JSON |

@@ -124,7 +124,8 @@ Si el cliente corre en otra computadora: `export COORDINATOR_URL=http://<IP del 
   - **Imagen:** se hace una miniatura.
 - **Reparto automático:** las tareas esperan en colas y las toma el worker que se libera primero. Los casos urgentes (prioridad alta) pasan adelante.
 - **Cierre correcto (barrier/join):** un caso se da por terminado recién cuando terminan todas sus tareas.
-- **Tolerancia a fallos:** si un worker se cae, otro retoma su tarea. Los errores de red se reintentan. Los casos se pueden cancelar.
+- **Tolerancia a fallos:** si un worker se cae, otro retoma su tarea. Los errores de red se reintentan.
+- **Control de casos:** se pueden **pausar, reanudar y cancelar** desde el dashboard o el cliente.
 - **Monitoreo:** CPU, RAM y estado de cada worker, de qué computadora viene cada uno y pausa automática si una computadora se satura.
 - **Resultados y reportes:** todo se descarga desde el dashboard, y cada caso tiene un reporte con su resumen.
 
