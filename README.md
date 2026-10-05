@@ -9,7 +9,7 @@ Recibe **casos**: grupos de archivos de video, audio e imágenes, por ejemplo to
 |---|---|
 | [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | Cómo está armado el sistema y por qué |
 | [docs/MANUAL_USUARIO.md](docs/MANUAL_USUARIO.md) | Cómo usar el dashboard y el cliente |
-| [docs/INFORME_PRUEBAS.md](docs/INFORME_PRUEBAS.md) | Qué pruebas hacer y dónde anotar los resultados |
+| [docs/Informe_de_pruebas.pdf](docs/Informe_de_pruebas.pdf) | Resultados de las pruebas en el despliegue real (también en .docx) |
 
 ## Las piezas
 
