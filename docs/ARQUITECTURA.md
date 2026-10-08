@@ -4,7 +4,7 @@
  IC-6600 Principios de Sistemas Operativos · TEC Campus San Carlos · II Semestre 2026  
 ![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANklEQVR4nO3OQQmAABRAsSeYxZw/lieLGMACBrCCNxG2BFtmZquOAAD4i3Ot7mr/egIAwGvXA6fGBdgoVMwYAAAAAElFTkSuQmCC)  
 **Resumen en un párrafo**  
-El usuario sube un **caso**: un grupo de archivos relacionados, por ejemplo todo el material de un evento (videos, canciones y fotos). Un  **coordinador** revisa cada archivo, decide qué hacerle según su tipo y lo divide en  **sub-tareas** chicas. Esas sub-tareas se ponen en  **filas de espera** (colas de RabbitMQ). Tres  **workers**, cada uno en una computadora distinta, van tomando sub-tareas de esas filas y las procesan  **al mismo tiempo** con FFmpeg. Cuando terminan  **todas** las sub-tareas del caso, el coordinador lo da por cerrado y genera un  **reporte**. Un  **dashboard** web muestra todo en vivo.  
+El usuario sube un **caso**: un grupo de archivos relacionados, por ejemplo todo el material de un evento (videos, canciones y fotos). Un  **coordinador** revisa cada archivo, decide qué hacerle según su tipo y lo divide en  **sub-tareas** chicas. Esas sub-tareas se ponen en  **filas de espera** (colas de RabbitMQ). Cuatro **workers**, en cuatro computadoras distintas, van tomando sub-tareas de esas filas y las procesan  **al mismo tiempo** con FFmpeg. Cuando terminan  **todas** las sub-tareas del caso, el coordinador lo da por cerrado y genera un  **reporte**. Un  **dashboard** web muestra todo en vivo.  
 **Glosario**  
 | | |  
 |-|-|  
@@ -38,15 +38,16 @@ flowchart LR
          W1[worker-1]  
          W2[worker-2]  
          W3[worker-3]  
+         W4[worker-4]  
      end  
    
      CLI -- sube casos --> API  
      WEB -- sube casos y consulta --> API  
      API -- pone sub-tareas en las colas --> RMQ  
-     RMQ -- entrega sub-tareas --> W1 & W2 & W3  
-     W1 & W2 & W3 -- avisan cómo van --> RMQ  
+     RMQ -- entrega sub-tareas --> W1 & W2 & W3 & W4  
+     W1 & W2 & W3 & W4 -- avisan cómo van --> RMQ  
      RMQ -- avisos --> API  
-     W1 & W2 & W3 -- bajan el archivo, suben el resultado,<br/>mandan heartbeat --> API  
+     W1 & W2 & W3 & W4 -- bajan el archivo, suben el resultado,<br/>mandan heartbeat --> API  
      API --- PG  
      API --- REPO  
    
@@ -64,7 +65,7 @@ flowchart LR
 **Cómo se conectan:** todo es  **por red**. Los workers no comparten disco con el coordinador.  
 - Por **RabbitMQ** (puerto 5672) reciben las sub-tareas y avisan cómo van.  
 - Por **HTTP** (puerto 8000) bajan el archivo original, suben el resultado, informan el % de avance y mandan el heartbeat.  
-**Despliegue:** RabbitMQ, PostgreSQL y el coordinador corren en una computadora. Cada integrante corre un worker en su propia computadora.  
+**Despliegue:** RabbitMQ, PostgreSQL y el coordinador corren en una computadora, que también ejecuta worker-1. Los otros tres workers corren en tres computadoras más: dos en la red local del TEC (worker-2 y worker-3) y una desde otra red, conectada mediante la VPN Tailscale (worker-4).  
 ![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANUlEQVR4nO3OQQmAABRAsSd49m4tA8nPaQJjWMGbCFuCLTOzV2cAAPzFvVZbdXw9AQDgtesBorcEPwOKyvQAAAAASUVORK5CYII=)  
 **2. Qué pasa cuando llega un caso, paso a paso**  
 1. El usuario sube los archivos (desde el dashboard o con el cliente).  
@@ -130,7 +131,7 @@ Cada caso puede traer información extra (evento, sesión, usuario, lote y datos
 ![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANUlEQVR4nO3OQQmAABRAsSd4NIGBzPXBmAawhhW8ibAl2DIze3UGAMBf3Gu1VcfXEwAAXrsehaQEN+8fLHEAAAAASUVORK5CYII=)  
 **4. Cómo se reparte el trabajo (conexión con la Unidad 1)**  
 **La decisión: workers genéricos, colas por tipo de carga**  
-**Los tres workers hacen de todo.** Cualquiera puede convertir un video, un audio o hacer una miniatura. Pero las sub-tareas no van a una sola fila, sino a  **tres filas según cuánto cuestan**:  
+**Los cuatro workers hacen de todo.** Cualquiera puede convertir un video, un audio o hacer una miniatura. Pero las sub-tareas no van a una sola fila, sino a  **tres filas según cuánto cuestan**:  
 | | | |  
 |-|-|-|  
 | **Cola** | **Qué va ahí** | **Cuánto cuesta** |   
@@ -140,10 +141,10 @@ Cada caso puede traer información extra (evento, sesión, usuario, lote y datos
    
 Cada worker mira las tres colas y toma lo que haya.  
 **Por qué workers genéricos**  
-Nuestras tres computadoras son de potencia parecida, y la carga cambia mucho de un caso a otro: uno puede ser casi todo fotos y el siguiente casi todo video.  
+Nuestras cuatro computadoras son personales y ninguna tiene una ventaja clara, como una GPU dedicada, que justifique darle un trabajo exclusivo. Además, la carga cambia mucho de un caso a otro: uno puede ser casi todo fotos y el siguiente casi todo video.  
 - **Nadie se queda sin hacer nada** mientras haya trabajo de cualquier tipo.  
 - **Si se cae una computadora, las otras siguen con todo**, porque todas saben hacer todo. Si hubiera una sola "computadora de video" y se apagara, los videos quedarían esperando para siempre.  
-- **Es más simple:** los tres workers se lanzan igual.  
+- **Es más simple:** los cuatro workers se lanzan igual.  
 **Por qué, aun así, tres colas separadas**  
 En la Unidad 1 vimos que no todo el trabajo aprovecha igual los recursos: una GPU sirve para unas cosas, una NPU para otras. Acá pasa algo parecido: convertir video es muy costoso, y hacer una miniatura casi no cuesta nada. Separarlas en colas sirve para tres cosas:  
 - **Que lo rápido no espere detrás de lo lento.** Si hubiera una sola fila, una miniatura de un segundo podría quedar detrás de cinco videos de 10 minutos. Con colas separadas, el primer worker que se libera la toma enseguida.  
@@ -335,6 +336,6 @@ El coordinador ofrece estas direcciones. La documentación interactiva está en 
 | Comunicación entre procesos | Mensajes por RabbitMQ y pedidos HTTP, siempre por red |   
 | Recursos y heterogeneidad | Colas según el costo de la tarea; pausa automática con CPU alta |   
 | Monitoreo y balanceo | Heartbeats, dashboard, reparto al que termina primero |   
-| Sistemas distribuidos | Tres computadoras, tolerancia a caídas, redistribución de tareas |   
+| Sistemas distribuidos | Cuatro computadoras (una conectada por VPN), tolerancia a caídas, redistribución de tareas |   
 | Archivos | Repositorio de originales y resultados, reportes y metadatos |   
    

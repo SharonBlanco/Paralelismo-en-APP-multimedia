@@ -22,9 +22,11 @@ Recibe **casos**: grupos de archivos de video, audio e imágenes, por ejemplo to
 │  RabbitMQ (filas de espera de tareas)                │
 │  uploads/ (originales)   results/ (resultados)       │
 └──────────────────────────────────────────────────────┘
-        │                     │                    │
-        ▼                     ▼                    ▼
-   worker-1 (PC 1)       worker-2 (PC 2)      worker-3 (PC 3)
+        │                │                │                │
+        ▼                ▼                ▼                ▼
+   worker-1 (PC 1)  worker-2 (PC 2)  worker-3 (PC 3)  worker-4 (PC 4)
+   misma PC del     red del TEC      red del TEC      otra red, por
+   coordinador                                        VPN Tailscale
 ```
 
 | Carpeta / archivo | Qué es |
@@ -60,7 +62,7 @@ python coordinador/app.py
 
 ## 2. Encender un worker en cada computadora
 
-Cada integrante necesita la carpeta `worker/` en su computadora. Cada worker tiene que tener un **nombre distinto**.
+Cada computadora que aporte un worker necesita la carpeta `worker/`. En nuestro despliegue son cuatro: la del coordinador (worker-1), dos en la red del TEC (worker-2 y worker-3) y una que se conecta desde otra red por Tailscale (worker-4). Cada worker tiene que tener un **nombre distinto**.
 
 **Con Docker** (queda en la terminal; se apaga con Ctrl+C):
 

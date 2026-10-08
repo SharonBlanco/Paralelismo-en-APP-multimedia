@@ -18,7 +18,7 @@ En **Nuevo caso**:
 4. Tocá **Enviar caso**. Se ve el avance de la subida y, al final, el número del caso creado.  
 Si mandás un tipo de archivo que no está soportado (por ejemplo, un PDF desde el cliente), ese archivo queda marcado como **"formato no soportado"** y el resto del caso se procesa igual.  
 **1.4 Workers activos**  
-Arriba de la tabla hay un resumen, por ejemplo: *"3 workers conectados en 3 máquinas distintas"*.  
+Arriba de la tabla hay un resumen, por ejemplo: *"4 workers conectados en 4 máquinas distintas"*.  
 | | |  
 |-|-|  
 | **Columna** | **Qué muestra** |   
