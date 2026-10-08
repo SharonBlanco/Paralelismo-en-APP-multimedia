@@ -15,7 +15,7 @@ El usuario sube un **caso**: un grupo de archivos relacionados, por ejemplo todo
 | **Worker** | Un programa (worker/worker.py) que corre en cada computadora y hace el trabajo pesado. |   
 | **Cola** | Una fila de espera donde las sub-tareas aguardan a que un worker las tome. La maneja **RabbitMQ**. |   
 | **Pool** | Cada una de las tres colas de trabajo, según el tipo de carga: video, audio o ligera. |   
-| **Heartbeat** | Un aviso que cada worker manda cada 5 segundos ("sigo vivo, uso tanto de CPU y RAM"). |   
+| **Heartbeat** | Un aviso que cada worker manda cada 5 segundos. |   
 | **Barrier/join** | La regla de "no cerrar el caso hasta que terminen todas sus sub-tareas". |   
 | **FFmpeg** | La herramienta que convierte y analiza audio y video. |   
    
