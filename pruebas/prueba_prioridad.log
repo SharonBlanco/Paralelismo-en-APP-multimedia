@@ -1,0 +1,79 @@
+============================================================
+PRUEBA DE PRIORIDADES
+============================================================
+[✓] PRIO-1 caso_012_video: case-785ec07b | 6 archivos (128 MB) → 18 sub-tareas | prioridad 1 | subida 0.94 s
+[✓] PRIO-1 caso_013_video: case-3012df64 | 6 archivos (264 MB) → 18 sub-tareas | prioridad 1 | subida 4.84 s
+[*] Sub-tareas esperando en la cola de video: 30   
+[✓] PRIO-10 caso_014_video: case-5530b7e6 | 6 archivos (243 MB) → 18 sub-tareas | prioridad 10 | subida 4.87 s
+[*] Caso urgente enviado a las 19:06:03
+[*] 0/3 casos terminados · 4/54 sub-tareas · 0 s[*] 0/3 casos terminados · 5/54 sub-tareas · 3 s[*] 0/3 casos terminados · 6/54 sub-tareas · 6 s[*] 0/3 casos terminados · 11/54 sub-tareas · 9 s[*] 0/3 casos terminados · 11/54 sub-tareas · 12 s[*] 0/3 casos terminados · 14/54 sub-tareas · 15 s[*] 0/3 casos terminados · 15/54 sub-tareas · 18 s[*] 0/3 casos terminados · 16/54 sub-tareas · 21 s[*] 0/3 casos terminados · 17/54 sub-tareas · 25 s[*] 0/3 casos terminados · 17/54 sub-tareas · 28 s[*] 0/3 casos terminados · 17/54 sub-tareas · 31 s[*] 0/3 casos terminados · 17/54 sub-tareas · 34 s[*] 0/3 casos terminados · 17/54 sub-tareas · 37 s[*] 0/3 casos terminados · 17/54 sub-tareas · 40 s[*] 0/3 casos terminados · 18/54 sub-tareas · 43 s[*] 0/3 casos terminados · 18/54 sub-tareas · 46 s[*] 0/3 casos terminados · 18/54 sub-tareas · 49 s[*] 0/3 casos terminados · 18/54 sub-tareas · 52 s[*] 0/3 casos terminados · 18/54 sub-tareas · 55 s[*] 0/3 casos terminados · 20/54 sub-tareas · 58 s[*] 0/3 casos terminados · 20/54 sub-tareas · 62 s[*] 0/3 casos terminados · 23/54 sub-tareas · 65 s[*] 0/3 casos terminados · 26/54 sub-tareas · 68 s[*] 0/3 casos terminados · 28/54 sub-tareas · 71 s[*] 0/3 casos terminados · 29/54 sub-tareas · 74 s[*] 0/3 casos terminados · 33/54 sub-tareas · 77 s[*] 1/3 casos terminados · 37/54 sub-tareas · 80 s[*] 1/3 casos terminados · 37/54 sub-tareas · 83 s[*] 1/3 casos terminados · 40/54 sub-tareas · 86 s[*] 1/3 casos terminados · 40/54 sub-tareas · 89 s[*] 1/3 casos terminados · 40/54 sub-tareas · 92 s[*] 1/3 casos terminados · 41/54 sub-tareas · 95 s[*] 1/3 casos terminados · 41/54 sub-tareas · 98 s[*] 1/3 casos terminados · 41/54 sub-tareas · 101 s[*] 2/3 casos terminados · 42/54 sub-tareas · 104 s[*] 2/3 casos terminados · 45/54 sub-tareas · 107 s[*] 2/3 casos terminados · 48/54 sub-tareas · 110 s[*] 2/3 casos terminados · 49/54 sub-tareas · 114 s[*] 2/3 casos terminados · 49/54 sub-tareas · 117 s[*] 2/3 casos terminados · 52/54 sub-tareas · 120 s[*] 2/3 casos terminados · 52/54 sub-tareas · 123 s[*] 2/3 casos terminados · 52/54 sub-tareas · 126 s[*] 2/3 casos terminados · 52/54 sub-tareas · 129 s[*] 2/3 casos terminados · 52/54 sub-tareas · 132 s[*] 2/3 casos terminados · 52/54 sub-tareas · 135 s[*] 2/3 casos terminados · 52/54 sub-tareas · 138 s[*] 2/3 casos terminados · 52/54 sub-tareas · 141 s[*] 2/3 casos terminados · 52/54 sub-tareas · 144 s[*] 2/3 casos terminados · 52/54 sub-tareas · 147 s[*] 2/3 casos terminados · 52/54 sub-tareas · 150 s[*] 2/3 casos terminados · 52/54 sub-tareas · 153 s[*] 2/3 casos terminados · 52/54 sub-tareas · 156 s[*] 2/3 casos terminados · 53/54 sub-tareas · 159 s[*] 3/3 casos terminados · 54/54 sub-tareas · 162 s
+
+============================================================
+ORDEN EN QUE LOS WORKERS TOMARON LAS SUB-TAREAS
+============================================================
+19:05:53  prio  1  worker-1   convert_format      c012_video_01_liviano.avi
+19:05:53  prio  1  worker-3   extract_audio       c012_video_01_liviano.avi
+19:05:53  prio  1  worker-2   generate_thumbnail  c012_video_01_liviano.avi
+19:05:54  prio  1  worker-1   convert_format      c012_video_02_mediano.avi
+19:05:55  prio  1  worker-2   extract_audio       c012_video_02_mediano.avi
+19:05:56  prio  1  worker-3   generate_thumbnail  c012_video_02_mediano.avi
+19:06:02  prio  1  worker-1   convert_format      c012_video_03_liviano.mov
+---------------- 19:06:03  llega el caso urgente (prioridad 10) ----------------
+19:06:03  prio 10  worker-1   convert_format      c014_video_01_mediano.avi
+19:06:08  prio 10  worker-1   extract_audio       c014_video_01_mediano.avi
+19:06:09  prio 10  worker-1   generate_thumbnail  c014_video_01_mediano.avi
+19:06:10  prio 10  worker-1   convert_format      c014_video_02_liviano.avi
+19:06:10  prio 10  worker-1   extract_audio       c014_video_02_liviano.avi
+19:06:11  prio 10  worker-1   generate_thumbnail  c014_video_02_liviano.avi
+19:06:11  prio 10  worker-1   convert_format      c014_video_03_mediano.mp4
+19:06:15  prio 10  worker-1   extract_audio       c014_video_03_mediano.mp4
+19:06:16  prio 10  worker-1   generate_thumbnail  c014_video_03_mediano.mp4
+19:06:17  prio 10  worker-1   convert_format      c014_video_04_mediano.avi
+19:06:21  prio 10  worker-3   extract_audio       c014_video_04_mediano.avi
+19:06:24  prio 10  worker-1   generate_thumbnail  c014_video_04_mediano.avi
+19:06:25  prio 10  worker-1   convert_format      c014_video_05_pesado.mov
+19:06:45  prio 10  worker-2   extract_audio       c014_video_05_pesado.mov
+19:07:00  prio 10  worker-3   generate_thumbnail  c014_video_05_pesado.mov
+19:07:02  prio 10  worker-1   convert_format      c014_video_06_mediano.avi
+19:07:05  prio 10  worker-1   extract_audio       c014_video_06_mediano.avi
+19:07:06  prio 10  worker-1   generate_thumbnail  c014_video_06_mediano.avi
+19:07:07  prio  1  worker-1   extract_audio       c012_video_03_liviano.mov
+19:07:07  prio  1  worker-1   generate_thumbnail  c012_video_03_liviano.mov
+19:07:08  prio  1  worker-1   convert_format      c012_video_04_mediano.mp4
+19:07:09  prio  1  worker-1   extract_audio       c012_video_04_mediano.mp4
+19:07:10  prio  1  worker-1   generate_thumbnail  c012_video_04_mediano.mp4
+19:07:11  prio  1  worker-1   convert_format      c012_video_05_mediano.mov
+19:07:16  prio  1  worker-1   extract_audio       c012_video_05_mediano.mov
+19:07:17  prio  1  worker-1   generate_thumbnail  c012_video_05_mediano.mov
+19:07:18  prio  1  worker-1   convert_format      c012_video_06_liviano.avi
+19:07:18  prio  1  worker-1   extract_audio       c012_video_06_liviano.avi
+19:07:19  prio  1  worker-1   generate_thumbnail  c012_video_06_liviano.avi
+19:07:19  prio  1  worker-1   convert_format      c013_video_01_liviano.mp4
+19:07:20  prio  1  worker-1   extract_audio       c013_video_01_liviano.mp4
+19:07:20  prio  1  worker-1   generate_thumbnail  c013_video_01_liviano.mp4
+19:07:21  prio  1  worker-1   convert_format      c013_video_02_mediano.avi
+19:07:26  prio  1  worker-1   extract_audio       c013_video_02_mediano.avi
+19:07:27  prio  1  worker-1   generate_thumbnail  c013_video_02_mediano.avi
+19:07:28  prio  1  worker-1   convert_format      c013_video_03_pesado.avi
+19:07:36  prio  1  worker-2   extract_audio       c013_video_03_pesado.avi
+19:07:46  prio  1  worker-3   generate_thumbnail  c013_video_03_pesado.avi
+19:07:48  prio  1  worker-1   convert_format      c013_video_04_liviano.mov
+19:07:49  prio  1  worker-1   extract_audio       c013_video_04_liviano.mov
+19:07:49  prio  1  worker-1   generate_thumbnail  c013_video_04_liviano.mov
+19:07:50  prio  1  worker-1   convert_format      c013_video_05_mediano.avi
+19:07:51  prio  1  worker-1   extract_audio       c013_video_05_mediano.avi
+19:07:52  prio  1  worker-1   generate_thumbnail  c013_video_05_mediano.avi
+19:07:53  prio  1  worker-1   convert_format      c013_video_06_mediano.avi
+19:08:00  prio  1  worker-1   extract_audio       c013_video_06_mediano.avi
+19:08:01  prio  1  worker-1   generate_thumbnail  c013_video_06_mediano.avi
+
+============================================================
+RESULTADO
+============================================================
+Sub-tareas de prioridad 1 que todavía esperaban cuando llegó el urgente: 29
+Sub-tareas del urgente (prioridad 10): 18
+Sub-tareas de prioridad 1 que se tomaron antes que el urgente terminara de repartirse: 0
+Terminó el urgente: 19:07:46  ·  terminaron los de prioridad 1: 19:08:44
+
+[✓] PRIORIDAD RESPETADA: desde que llegó el caso urgente, los workers tomaron primero
+    todas sus sub-tareas, aunque las de prioridad 1 llevaban más tiempo esperando.
