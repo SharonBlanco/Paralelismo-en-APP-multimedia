@@ -4,19 +4,19 @@
  IC-6600 Principios de Sistemas Operativos · TEC Campus San Carlos · II Semestre 2026  
 ![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANklEQVR4nO3OQQmAABRAsSeYxZw/lieLGMACBrCCNxG2BFtmZquOAAD4i3Ot7mr/egIAwGvXA6fGBdgoVMwYAAAAAElFTkSuQmCC)  
 **Resumen en un párrafo**  
-El usuario sube un **caso**: un grupo de archivos relacionados, por ejemplo todo el material de un evento (videos, canciones y fotos). Un  **coordinador** revisa cada archivo, decide qué hacerle según su tipo y lo divide en  **sub-tareas** chicas. Esas sub-tareas se ponen en  **filas de espera** (colas de RabbitMQ). Cuatro **workers**, en cuatro computadoras distintas, van tomando sub-tareas de esas filas y las procesan  **al mismo tiempo** con FFmpeg. Cuando terminan  **todas** las sub-tareas del caso, el coordinador lo da por cerrado y genera un  **reporte**. Un  **dashboard** web muestra todo en vivo.  
+El usuario sube un **caso**: un grupo de archivos relacionados, por ejemplo todo el material de un evento (videos, canciones y fotos). Un  **coordinador** revisa cada archivo, decide qué hacerle según su tipo y lo divide en  **sub-tareas** pequeñas. Esas sub-tareas se ponen en  **filas de espera** (colas de RabbitMQ). Cuatro **workers**, en cuatro computadoras distintas, van tomando sub-tareas de esas filas y las procesan  **al mismo tiempo** con FFmpeg. Cuando terminan  **todas** las sub-tareas del caso, el coordinador lo da por cerrado y genera un  **reporte**. Un  **dashboard** web muestra todo en vivo.  
 **Glosario**  
 | | |  
 |-|-|  
 | **Término** | **Qué significa aquí** |   
 | **Caso** | Un pedido del usuario: uno o varios archivos que se procesan juntos. **Homogéneo** si son todos del mismo tipo;  **heterogéneo** si mezcla video, audio e imágenes. |   
-| **Sub-tarea** | Una operación sobre un archivo, por ejemplo "convertir este video a MKV". Un caso tiene muchas. |   
+| **Sub-tarea** | Una operación sobre un archivo, por ejemplo, convertir un video a MKV. Un caso tiene muchas. |   
 | **Coordinador** | El programa central (coordinador/app.py). Recibe casos, reparte el trabajo, junta los resultados y sirve el dashboard. |   
-| **Worker** | Un programa (worker/worker.py) que corre en cada computadora y hace el trabajo pesado. |   
+| **Worker** | Un programa (worker/worker.py) que corre en cada computadora y realiza el trabajo de procesamiento. |   
 | **Cola** | Una fila de espera donde las sub-tareas aguardan a que un worker las tome. La maneja **RabbitMQ**. |   
 | **Pool** | Cada una de las tres colas de trabajo, según el tipo de carga: video, audio o ligera. |   
 | **Heartbeat** | Un aviso que cada worker manda cada 5 segundos. |   
-| **Barrier/join** | La regla de "no cerrar el caso hasta que terminen todas sus sub-tareas". |   
+| **Barrier/join** | Se mantiene abierto el caso hasta que terminen todas sus sub-tareas". |   
 | **FFmpeg** | La herramienta que convierte y analiza audio y video. |   
    
 ![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANUlEQVR4nO3OQQmAABRAsSd4EKxgBjP+Asa0hxW8ibAl2DIzR3UFAMBf3Gu1VefXEwAAXtsfSqwDVbgKngwAAAAASUVORK5CYII=)  
@@ -63,7 +63,7 @@ flowchart LR
 | **Cliente** | cliente/cliente.py | Mandar casos desde la terminal, generar carga y medir tiempos |   
    
 **Cómo se conectan:** todo es  **por red**. Los workers no comparten disco con el coordinador.  
-- Por **RabbitMQ** (puerto 5672) reciben las sub-tareas y avisan cómo van.  
+- Por **RabbitMQ** (puerto 5672) reciben las sub-tareas y reporta su desempeño.  
 - Por **HTTP** (puerto 8000) bajan el archivo original, suben el resultado, informan el % de avance y mandan el heartbeat.  
 **Despliegue:** RabbitMQ, PostgreSQL y el coordinador corren en una computadora, que también ejecuta worker-1. Los otros tres workers corren en tres computadoras más: dos en la red local del TEC (worker-2 y worker-3) y una desde otra red, conectada mediante la VPN Tailscale (worker-4).  
 ![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANUlEQVR4nO3OQQmAABRAsSd49m4tA8nPaQJjWMGbCFuCLTOzV2cAAPzFvVZbdXw9AQDgtesBorcEPwOKyvQAAAAASUVORK5CYII=)  
@@ -72,9 +72,9 @@ flowchart LR
 2. El coordinador los guarda en uploads/<caso>/.  
 3. Mira el tipo de cada archivo y decide sus sub-tareas (sección 3).  
 4. Registra el caso y las sub-tareas en la base de datos.  
-5. Pone cada sub-tarea en la cola que le corresponde, con la prioridad del caso.  
-6. Un worker libre toma una sub-tarea y avisa: **"la tomé"** (asignada).  
-7. El worker baja el archivo y avisa: **"estoy procesando"**. Mientras trabaja, informa el % de avance.  
+5. Pone cada sub-tarea en la cola correspondiente, con la prioridad del caso.  
+6. Un worker libre toma una sub-tarea y lo reporta (asignada).  
+7. El worker baja el archivo y . Mientras trabaja, informa el % de avance.  
 8. Al terminar, sube el resultado al coordinador y avisa: **"terminé"** (o "falló", con el motivo).  
 9. Recién ahí le confirma a RabbitMQ que la tarea está hecha. Así, si el worker se cae antes, la tarea vuelve a la cola.  
 10. El coordinador actualiza la sub-tarea. Si era **la última** del caso, lo cierra y genera el reporte.  
