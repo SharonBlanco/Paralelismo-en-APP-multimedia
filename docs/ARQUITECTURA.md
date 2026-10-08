@@ -1,341 +1,434 @@
-**Documento de arquitectura**  
-**Plataforma Distribuida de Procesamiento Multimedia por Casos y Monitoreo Cooperativo de Recursos**  
-   
- IC-6600 Principios de Sistemas Operativos · TEC Campus San Carlos · II Semestre 2026  
-![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANklEQVR4nO3OQQmAABRAsSeYxZw/lieLGMACBrCCNxG2BFtmZquOAAD4i3Ot7mr/egIAwGvXA6fGBdgoVMwYAAAAAElFTkSuQmCC)  
-**Resumen en un párrafo**  
-El usuario sube un **caso**: un grupo de archivos relacionados, por ejemplo todo el material de un evento (videos, canciones y fotos). Un  **coordinador** revisa cada archivo, decide qué hacerle según su tipo y lo divide en  **sub-tareas** chicas. Esas sub-tareas se ponen en  **filas de espera** (colas de RabbitMQ). Cuatro **workers**, en cuatro computadoras distintas, van tomando sub-tareas de esas filas y las procesan  **al mismo tiempo** con FFmpeg. Cuando terminan  **todas** las sub-tareas del caso, el coordinador lo da por cerrado y genera un  **reporte**. Un  **dashboard** web muestra todo en vivo.  
-**Glosario**  
-| | |  
-|-|-|  
-| **Término** | **Qué significa aquí** |   
-| **Caso** | Un pedido del usuario: uno o varios archivos que se procesan juntos. **Homogéneo** si son todos del mismo tipo;  **heterogéneo** si mezcla video, audio e imágenes. |   
-| **Sub-tarea** | Una operación sobre un archivo, por ejemplo "convertir este video a MKV". Un caso tiene muchas. |   
-| **Coordinador** | El programa central (coordinador/app.py). Recibe casos, reparte el trabajo, junta los resultados y sirve el dashboard. |   
-| **Worker** | Un programa (worker/worker.py) que corre en cada computadora y hace el trabajo pesado. |   
-| **Cola** | Una fila de espera donde las sub-tareas aguardan a que un worker las tome. La maneja **RabbitMQ**. |   
-| **Pool** | Cada una de las tres colas de trabajo, según el tipo de carga: video, audio o ligera. |   
-| **Heartbeat** | Un aviso que cada worker manda cada 5 segundos ("sigo vivo, uso tanto de CPU y RAM"). |   
-| **Barrier/join** | La regla de "no cerrar el caso hasta que terminen todas sus sub-tareas". |   
-| **FFmpeg** | La herramienta que convierte y analiza audio y video. |   
-   
-![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANUlEQVR4nO3OQQmAABRAsSd4EKxgBjP+Asa0hxW8ibAl2DIzR3UFAMBf3Gu1VefXEwAAXtsfSqwDVbgKngwAAAAASUVORK5CYII=)  
-**1. Componentes**  
-flowchart LR  
-     subgraph Clientes  
-         CLI[cliente.py<br/>envío y carga]  
-         WEB[Dashboard web<br/>subida de archivos]  
-     end  
-   
-     subgraph Coordinador["Computadora del coordinador"]  
-         API[Coordinador<br/>FastAPI]  
-         RMQ[(RabbitMQ<br/>colas)]  
-         PG[(PostgreSQL<br/>estado)]  
-         REPO[/Archivos:<br/>uploads y results/]  
-     end  
-   
-     subgraph Workers["Computadoras de los workers"]  
-         W1[worker-1]  
-         W2[worker-2]  
-         W3[worker-3]  
-         W4[worker-4]  
-     end  
-   
-     CLI -- sube casos --> API  
-     WEB -- sube casos y consulta --> API  
-     API -- pone sub-tareas en las colas --> RMQ  
-     RMQ -- entrega sub-tareas --> W1 & W2 & W3 & W4  
-     W1 & W2 & W3 & W4 -- avisan cómo van --> RMQ  
-     RMQ -- avisos --> API  
-     W1 & W2 & W3 & W4 -- bajan el archivo, suben el resultado,<br/>mandan heartbeat --> API  
-     API --- PG  
-     API --- REPO  
-   
-| | | |  
-|-|-|-|  
-| **Pieza** | **Tecnología** | **Qué hace** |   
-| **Coordinador** | Python + FastAPI | Recibe los casos, decide qué hacer con cada archivo, reparte, junta resultados, arma reportes y sirve el dashboard |   
-| **Colas** | RabbitMQ | Guarda las sub-tareas en espera hasta que un worker las toma. Hay tres colas de trabajo (tareas.video, tareas.audio, tareas.ligera) y una de avisos (results) |   
-| **Base de datos** | PostgreSQL | Guarda el estado de casos, sub-tareas y workers, y el historial de CPU y RAM |   
-| **Workers** | Python + FFmpeg (con o sin Docker) | Toman sub-tareas, las procesan y avisan el resultado |   
-| **Archivos** | Carpetas del coordinador | uploads/ guarda los originales; results/ guarda los resultados y el reporte de cada caso |   
-| **Dashboard** | Página web del coordinador | Subir casos y ver todo en vivo |   
-| **Cliente** | cliente/cliente.py | Mandar casos desde la terminal, generar carga y medir tiempos |   
-   
-**Cómo se conectan:** todo es  **por red**. Los workers no comparten disco con el coordinador.  
-- Por **RabbitMQ** (puerto 5672) reciben las sub-tareas y avisan cómo van.  
-- Por **HTTP** (puerto 8000) bajan el archivo original, suben el resultado, informan el % de avance y mandan el heartbeat.  
-**Despliegue:** RabbitMQ, PostgreSQL y el coordinador corren en una computadora, que también ejecuta worker-1. Los otros tres workers corren en tres computadoras más: dos en la red local del TEC (worker-2 y worker-3) y una desde otra red, conectada mediante la VPN Tailscale (worker-4).  
-![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANUlEQVR4nO3OQQmAABRAsSd49m4tA8nPaQJjWMGbCFuCLTOzV2cAAPzFvVZbdXw9AQDgtesBorcEPwOKyvQAAAAASUVORK5CYII=)  
-**2. Qué pasa cuando llega un caso, paso a paso**  
-1. El usuario sube los archivos (desde el dashboard o con el cliente).  
-2. El coordinador los guarda en uploads/<caso>/.  
-3. Mira el tipo de cada archivo y decide sus sub-tareas (sección 3).  
-4. Registra el caso y las sub-tareas en la base de datos.  
-5. Pone cada sub-tarea en la cola que le corresponde, con la prioridad del caso.  
-6. Un worker libre toma una sub-tarea y avisa: **"la tomé"** (asignada).  
-7. El worker baja el archivo y avisa: **"estoy procesando"**. Mientras trabaja, informa el % de avance.  
-8. Al terminar, sube el resultado al coordinador y avisa: **"terminé"** (o "falló", con el motivo).  
-9. Recién ahí le confirma a RabbitMQ que la tarea está hecha. Así, si el worker se cae antes, la tarea vuelve a la cola.  
-10. El coordinador actualiza la sub-tarea. Si era **la última** del caso, lo cierra y genera el reporte.  
-sequenceDiagram  
-     participant C as Cliente  
-     participant K as Coordinador  
-     participant Q as RabbitMQ  
-     participant W as Worker  
-   
-     C->>K: sube el caso (archivos + prioridad)  
-     K->>K: decide las sub-tareas de cada archivo  
-     K->>Q: pone las sub-tareas en las colas  
-     Q->>W: entrega una sub-tarea  
-     W->>Q: "la tomé"  
-     W->>K: baja el archivo original  
-     W->>Q: "estoy procesando" (+ % de avance)  
-     W->>K: sube el resultado  
-     W->>Q: "terminé"  
-     Q->>K: llegan los avisos  
-     K->>K: ¿era la última del caso? → cierra el caso y arma el reporte  
-   
-![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANElEQVR4nO3OQQmAUBBAwSfIb+HdmNvAkgaxgjcRZhLMNjNHdQUAwF/ce7Wq8+sJAACvrQctewNKtdojwQAAAABJRU5ErkJggg==)  
-**3. Qué se le hace a cada archivo**  
-El coordinador decide por la **extensión** del archivo (función determine_subtasks):  
-| | | |  
-|-|-|-|  
-| **Si el archivo es…** | **Se le hace** | **Cola** |   
-| **Video** (mp4, mkv, avi, mov) | 3 sub-tareas: **convertir** de formato (mp4 → mkv; mkv, avi, mov → mp4),  **extraer el audio** a mp3 y sacar una  **portada** | video |   
-| **Audio sin comprimir** (wav, flac, ogg) | **Convertir** a mp3 | audio |   
-| **Canción mp3** | Buscar sus **metadatos**: álbum, fecha, género, versión y letra | ligera |   
-| **Imagen** (jpg, png) | Hacer una **miniatura** de 320 px | ligera |   
-| **Otra cosa** (txt, pdf…) | Nada: queda marcado como **"formato no soportado"**, sin ocupar a ningún worker | — |   
-   
-Un caso heterogéneo genera sub-tareas de distinto tipo y peso, que se procesan en paralelo en distintas computadoras.  
-**3.1 Cómo se elige la portada de un video**  
-No se toma un cuadro cualquiera. El worker usa FFmpeg así:  
-1. Mira **5 momentos** del video (al 10 %, 30 %, 50 %, 70 % y 90 %).  
-2. En cada momento analiza 60 cuadros seguidos con el filtro thumbnail de FFmpeg, que elige el **más representativo**: el que más se parece al color promedio de esa escena. Así descarta transiciones, fundidos o cuadros borrosos.  
-3. De esos 5 candidatos se queda con el que tiene **más detalle**: lo guarda en JPEG y elige el archivo más grande. Una imagen negra, blanca o lisa comprime mucho y queda chica; una con personas o escenario, no.  
-El reporte dice en qué segundo del video se tomó la portada.  
-**3.2 Cómo se buscan los metadatos de una canción**  
-Para cada mp3 se combinan varias fuentes:  
-| | |  
-|-|-|  
-| **Fuente** | **Qué da** |   
-| **ffprobe** (parte de FFmpeg, local) | Datos técnicos: duración, calidad, formato, y el título y artista que trae el archivo |   
-| **iTunes** (servicio público y gratuito) | Con el título y el artista, busca el **álbum, la fecha, el género, el número de pista y la carátula** |   
-| **MusicBrainz** (base de datos musical abierta) | Lo mismo, como respaldo si iTunes no la encuentra |   
-| **lyrics.ovh** (servicio público) | La **letra** de la canción |   
-   
-También detecta si es una **versión** acústica, en vivo, remix o instrumental. El reporte lo resume así: *"Álbum: Parachutes (2000) · Género: Alternative · Letra: sí · Fuente: iTunes"*. Si no hay internet o la canción no existe en esos servicios, **la tarea no falla**: entrega los datos técnicos e indica que no hubo coincidencia.  
-**3.3 Metadatos del caso**  
-Cada caso puede traer información extra (evento, sesión, usuario, lote y datos de cada archivo, como título o autor). Se guarda con el caso y aparece en el reporte.  
-![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANUlEQVR4nO3OQQmAABRAsSd4NIGBzPXBmAawhhW8ibAl2DIze3UGAMBf3Gu1VcfXEwAAXrsehaQEN+8fLHEAAAAASUVORK5CYII=)  
-**4. Cómo se reparte el trabajo (conexión con la Unidad 1)**  
-**La decisión: workers genéricos, colas por tipo de carga**  
-**Los cuatro workers hacen de todo.** Cualquiera puede convertir un video, un audio o hacer una miniatura. Pero las sub-tareas no van a una sola fila, sino a  **tres filas según cuánto cuestan**:  
-| | | |  
-|-|-|-|  
-| **Cola** | **Qué va ahí** | **Cuánto cuesta** |   
-| video | convertir video, extraer audio, portada | **Mucho**: usa toda la CPU, tarda de segundos a muchos minutos |   
-| audio | convertir wav, flac u ogg a mp3 | Medio |   
-| ligera | miniaturas y metadatos | Poco: milisegundos o segundos |   
-   
-Cada worker mira las tres colas y toma lo que haya.  
-**Por qué workers genéricos**  
-Nuestras cuatro computadoras son personales y ninguna tiene una ventaja clara, como una GPU dedicada, que justifique darle un trabajo exclusivo. Además, la carga cambia mucho de un caso a otro: uno puede ser casi todo fotos y el siguiente casi todo video.  
-- **Nadie se queda sin hacer nada** mientras haya trabajo de cualquier tipo.  
-- **Si se cae una computadora, las otras siguen con todo**, porque todas saben hacer todo. Si hubiera una sola "computadora de video" y se apagara, los videos quedarían esperando para siempre.  
-- **Es más simple:** los cuatro workers se lanzan igual.  
-**Por qué, aun así, tres colas separadas**  
-En la Unidad 1 vimos que no todo el trabajo aprovecha igual los recursos: una GPU sirve para unas cosas, una NPU para otras. Acá pasa algo parecido: convertir video es muy costoso, y hacer una miniatura casi no cuesta nada. Separarlas en colas sirve para tres cosas:  
-- **Que lo rápido no espere detrás de lo lento.** Si hubiera una sola fila, una miniatura de un segundo podría quedar detrás de cinco videos de 10 minutos. Con colas separadas, el primer worker que se libera la toma enseguida.  
-- **Ver dónde está el cuello de botella.** El dashboard muestra cuántas sub-tareas esperan en cada cola.  
-- **Dejar abierta la especialización.** Si alguna vez tuviéramos una computadora mucho más potente, se la podría dedicar solo a video (WORKER_POOLS=video WORKER_CONCURRENCY=2) sin cambiar nada más. Comparar ambas opciones con datos queda como prueba pendiente (ver el Informe de pruebas).  
-**Cómo se equilibra la carga**  
-- RabbitMQ le da a cada worker **solo una sub-tarea a la vez** (o las que diga WORKER_CONCURRENCY). La siguiente va al worker que termine primero, así que  **el más rápido termina haciendo más**, sin que nadie lo decida a mano.  
-- Si un worker tiene la CPU al límite, deja de pedir trabajo por un rato (sección 8).  
-*Detalle técnico:* * se usa * *prefetch_count = WORKER_CONCURRENCY* * con QoS global por canal. Cada sub-tarea se procesa en un hilo, y el hilo principal atiende la conexión con RabbitMQ.*  
-![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANklEQVR4nO3OMQ2AABAAsSNBACP6MMH6NpGACyywEZJWQZeZ2aszAAD+4l6rrTq+ngAA8Nr1AL+6BElk4wV6AAAAAElFTkSuQmCC)  
-**5. Prioridades**  
-Cada caso tiene una prioridad de **1 (baja) a 10 (alta)**. Las colas de RabbitMQ respetan esa prioridad:  **un caso urgente que llega después se procesa antes** que los que ya estaban esperando.  
-*Detalle técnico:* * colas durables con * *x-max-priority = 10* * y mensajes persistentes, así que no se pierden si se reinicia RabbitMQ.*  
-![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANUlEQVR4nO3OMQ2AABAAsSPBCj7fFwtCmJHAjAU2QtIq6DIzW7UHAMBfnGt1V8fHEQAA3rsexOkF3va0dq8AAAAASUVORK5CYII=)  
-**6. Estados y sincronización**  
-**Estados de una sub-tarea**  
-| | |  
-|-|-|  
-| **Estado** | **Significa** |   
-| pendiente | está en la cola esperando |   
-| asignada | un worker la tomó |   
-| en proceso | el worker ya bajó el archivo y está trabajando (muestra el %) |   
-| completada | terminó bien |   
-| fallida | no se pudo (archivo dañado, formato no soportado…) |   
-| reintentando | falló por un problema pasajero (por ejemplo, de red) y se va a volver a intentar |   
-| en pausa | el caso está pausado: la tarea espera a que se reanude |   
-| cancelada | el usuario canceló el caso |   
-   
-stateDiagram-v2  
-     [*] --> pendiente  
-     pendiente --> asignada: un worker la toma  
-     asignada --> en_proceso: bajó el archivo  
-     en_proceso --> completada  
-     en_proceso --> fallida: archivo dañado  
-     en_proceso --> reintentando: problema de red  
-     reintentando --> pendiente: vuelve a la cola  
-     en_proceso --> asignada: el worker se cayó y la toma otro  
-     pendiente --> cancelada  
-     en_proceso --> cancelada  
-   
-**Estados de un caso**  
-| | |  
-|-|-|  
-| **Estado** | **Significa** |   
-| en cola | se acaba de registrar |   
-| en proceso | todavía hay sub-tareas sin terminar |   
-| reintentando | hay sub-tareas sin terminar y al menos una esperando reintento |   
-| en pausa | el usuario lo pausó: lo que estaba corriendo termina y lo demás espera |   
-| **completado** | terminaron todas y **todas salieron bien** |   
-| **parcialmente completado** | terminaron todas y **alguna falló** |   
-| **fallido** | terminaron todas y **ninguna salió bien** |   
-| cancelado | el usuario lo canceló |   
-   
-**Barrier/join: no cerrar el caso antes de tiempo**  
-Las sub-tareas de un caso terminan en cualquier orden y en distintas computadoras: una puede tardar 1 segundo y otra 20 minutos. El coordinador **no puede dar el caso por terminado hasta que terminen todas**. Esa espera es la  **barrera**. Cuando se cumple,  **junta** los resultados (el *join*), decide el estado final y arma el reporte.  
-Cada vez que llega un aviso de un worker, el coordinador:  
-1. Revisa que esa sub-tarea no estuviera ya terminada. Si lo estaba, ignora el aviso, porque es un duplicado (por ejemplo, de una tarea redistribuida).  
-2. Actualiza la sub-tarea.  
-3. Cuenta cuántas sub-tareas del caso terminaron.  
-4. Si terminaron **todas**, cierra el caso y genera el reporte. Si no, espera el siguiente aviso.  
-*Detalle técnico:* * cada aviso se procesa en una transacción que bloquea la fila del caso (* *SELECT … FOR UPDATE* *), para que dos avisos simultáneos no se pisen. Está en * *refresh_case_status* *.*  
-![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANElEQVR4nO3OMQ0AIAwAwZIgBKn1gjJ0dGHBABMhuZt+/JaZIyJmAADwi9VP1NMNAABu1AaeoAUgyymsVwAAAABJRU5ErkJggg==)  
-**7. Qué pasa cuando algo sale mal**  
-| | |  
-|-|-|  
-| **Situación** | **Qué hace el sistema** |   
-| **Se cae un worker** a mitad de una tarea | Como no llegó a confirmarla, RabbitMQ **se la da a otro worker**. Queda registrado como "redistribuida". |   
-| **Falla la red** por un momento | La tarea pasa a "reintentando" y se vuelve a intentar a los 5 s y después a los 10 s. Si sigue fallando, queda como fallida. |   
-| **El archivo está dañado** | Falla definitivamente: reintentar no lo arreglaría. |   
-| **Llega un aviso repetido** | Se ignora. |   
-| **El usuario cancela** un caso | Lo que no empezó ya no se procesa. El worker que tome una de esas tareas recibe "caso cancelado" y la descarta. |   
-| **El usuario pausa** un caso | Lo que ya está corriendo termina. Si un worker toma una tarea de ese caso, el coordinador le responde "caso en pausa" y el worker la devuelve sin procesarla, así queda libre para otros casos. Al **reanudar**, el coordinador vuelve a poner en la cola solo esas tareas devueltas; las que nunca salieron de la cola siguen ahí, así que ninguna se procesa dos veces. |   
-| **Un worker deja de mandar heartbeat** por 15 s | Aparece como **desconectado**. |   
-| **Tareas muy largas** (videos de 500 MB) | RabbitMQ, por defecto, devuelve a la cola cualquier tarea que tarde más de 30 minutos. El coordinador sube ese límite a 4 horas al arrancar, para que las conversiones largas no se repitan. |   
-| **Archivos muy grandes** | Viajan **por partes** (de a 1 MB), nunca enteros en memoria, para no saturar la RAM. |   
-   
-![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANklEQVR4nO3OQQmAABRAsSfYxZo/jzlMYQLPJrCCNxG2BFtmZquOAAD4i3Ot7mr/egIAwGvXA4q7Bc870TqdAAAAAElFTkSuQmCC)  
-**8. Monitoreo y reacción a la carga**  
-**Qué se mide:** cada worker manda cada 5 segundos su uso de  **CPU y RAM**, cuántas tareas está haciendo y los datos de su computadora (procesador, núcleos, RAM). El coordinador guarda el estado actual y el historial. Además registra  **desde qué IP llega cada worker**, la prueba de que están en computadoras distintas.  
-**Cómo reacciona:** si un worker supera el  **80 % de CPU** en dos mediciones seguidas,  **deja de pedir trabajo nuevo** y aparece como  **saturado**. RabbitMQ le da las tareas a los otros workers. Cuando baja del  **60 %**, vuelve a pedir trabajo.  
-**Qué muestra el dashboard:**  
-- Tarjetas con totales: casos, workers activos, archivos procesados.  
-- Cuántas sub-tareas esperan en cada cola.  
-- Los workers: IP, computadora, estado, CPU, RAM y tareas hechas.  
-- Los casos, con su avance y su detalle.  
-- Gráficos de la variedad de archivos (tipos, formatos y tamaños).  
-- Trazabilidad: un mapa de qué worker procesó cada archivo, y una línea de tiempo que muestra las tareas corriendo en paralelo.  
-![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANElEQVR4nO3OQQmAABRAsad4EEtY9QcxnUms4E2ELcGWmTmrKwAA/uLeqrU6vp4AAPDa/gDzXgM37EF77AAAAABJRU5ErkJggg==)  
-**9. Dónde quedan los resultados y el reporte**  
-- **Originales:** uploads/<caso>/. Los workers los bajan del coordinador.  
-- **Resultados:** los workers los suben al coordinador y quedan en results/<caso>/. Se descargan desde el dashboard o con el cliente.  
-- **Por qué en el coordinador:** es la única computadora que siempre está encendida, así que los resultados se pueden recuperar aunque un worker se apague. No hace falta configurar carpetas compartidas entre computadoras distintas.  
-- **Reporte del caso:** se genera solo cuando el caso termina. Incluye:  
-  - fechas de inicio y fin;  
-  - un **resumen en una línea**, por ejemplo: *"De 15 archivos — 4 videos convertidos, 6 miniaturas generadas…; 1 fallido por formato no soportado"*;  
-  - el resultado de cada sub-tarea, con su worker y sus tiempos;  
-  - cuánto trabajó cada worker;  
-  - los errores y los metadatos.  
-- Se ve como página web imprimible, se descarga en JSON y se guarda en results/<caso>/reporte_<caso>.json.  
-![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANklEQVR4nO3OQQmAABRAsScYxpg/h5VMYARvRrCCNxG2BFtmZquOAAD4i3Ot7mr/egIAwGvXA224BcUMk6pDAAAAAElFTkSuQmCC)  
-**10. Base de datos**  
-erDiagram  
-     cases ||--o{ subtasks : contiene  
-     workers ||--o{ resource_logs : reporta  
-     workers ||--o{ subtasks : procesa  
-   
-     cases {  
-         varchar case_id PK  
-         varchar case_name  
-         int priority  
-         varchar status  
-         int total_subtasks  
-         jsonb metadata  
-         timestamp created_at  
-         timestamp finished_at  
-     }  
-     subtasks {  
-         varchar subtask_id PK  
-         varchar case_id FK  
-         varchar file_name  
-         varchar file_type  
-         bigint file_size  
-         varchar operation  
-         varchar pool  
-         varchar status  
-         decimal progress  
-         varchar assigned_worker  
-         int retries  
-         int reassignments  
-         jsonb result_info  
-         timestamp started_at  
-         timestamp finished_at  
-     }  
-     workers {  
-         varchar worker_id PK  
-         varchar host_address  
-         jsonb machine  
-         varchar status  
-         decimal cpu_usage  
-         decimal memory_usage  
-         int active_tasks  
-         timestamp last_heartbeat  
-     }  
-     resource_logs {  
-         serial id PK  
-         varchar worker_id FK  
-         decimal cpu_usage  
-         decimal memory_usage  
-         timestamp recorded_at  
-     }  
-   
-- **cases:** un registro por caso.  
-- **subtasks:** uno por sub-tarea, con su estado, worker, tiempos y resultado.  
-- **workers:** el estado actual de cada worker.  
-- **resource_logs:** el historial de CPU y RAM.  
-Si la base se creó con una versión anterior, el coordinador agrega solo las columnas que falten al arrancar.  
-![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANklEQVR4nO3OMQ2AABAAsSNBCkJfFSqwwIgHRiywEZJWQZeZ2ao9AAD+4lyruzq+ngAA8Nr1AOH8BeZxN/IIAAAAAElFTkSuQmCC)  
-**11. API**  
-El coordinador ofrece estas direcciones. La documentación interactiva está en http://<coordinador>:8000/docs.  
-| | | |  
-|-|-|-|  
-| **Método** | **Dirección** | **Para qué** |   
-| POST | /api/cases | Enviar un caso (archivos, nombre, prioridad 1–10 y metadatos opcionales) |   
-| GET | /api/cases | Listar los casos |   
-| GET | /api/cases/{id} | Ver un caso y sus sub-tareas |   
-| POST | /api/cases/{id}/pause · /api/cases/{id}/resume | Pausar / reanudar un caso |   
-| POST | /api/cases/{id}/cancel | Cancelar un caso |   
-| DELETE | /api/cases/{id} | Borrar un caso y sus archivos |   
-| GET | /api/cases/{id}/report | Reporte en JSON |   
-| GET | /cases/{id}/reporte | Reporte como página web |   
-| GET | /api/stats | Totales y estado de las colas |   
-| GET | /api/workers | Lista de workers |   
-| GET | /api/dataset | Datos de los gráficos de variedad |   
-| GET | /api/trace | Datos de la trazabilidad |   
-| GET | /api/results/{sub-tarea} | Descargar un resultado |   
-| *(workers)* | /api/workers/heartbeat, /api/files/..., /api/results/{id}/raw, /api/subtasks/{id}/progress | Heartbeat, bajar originales, subir resultados e informar avance |   
-   
-![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAnEAAAACCAYAAAA3pIp+AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAANUlEQVR4nO3OMQ2AABAAsSNhwgJWEPcbJpnRgQU2QtIq6DIze3UGAMBf3Gu1VcfXEwAAXrseaIkEMIPgIvAAAAAASUVORK5CYII=)  
-**12. Relación con los temas del curso**  
-| | |  
-|-|-|  
-| **Tema del curso** | **Dónde se ve en el proyecto** |   
-| Procesos | Cada worker es un proceso independiente en otra computadora; FFmpeg corre como proceso hijo |   
-| Estados de trabajos | Los estados de sub-tarea y de caso (sección 6) |   
-| Planificación | Qué se le hace a cada archivo, las colas por tipo y las prioridades |   
-| Colas | RabbitMQ, con prioridad y confirmación al terminar |   
-| Concurrencia | Varias sub-tareas y varios casos procesándose a la vez |   
-| Sincronización | Barrier/join: el caso se cierra solo cuando terminan todas sus sub-tareas |   
-| Comunicación entre procesos | Mensajes por RabbitMQ y pedidos HTTP, siempre por red |   
-| Recursos y heterogeneidad | Colas según el costo de la tarea; pausa automática con CPU alta |   
-| Monitoreo y balanceo | Heartbeats, dashboard, reparto al que termina primero |   
-| Sistemas distribuidos | Cuatro computadoras (una conectada por VPN), tolerancia a caídas, redistribución de tareas |   
-| Archivos | Repositorio de originales y resultados, reportes y metadatos |   
-   
+# Documento de arquitectura
+
+**Plataforma Distribuida de Procesamiento Multimedia por Casos y Monitoreo Cooperativo de Recursos**
+
+IC-6600 Principios de Sistemas Operativos · TEC Campus San Carlos · II Semestre 2026
+
+### Contenido
+
+1. [Componentes](#1-componentes)
+2. [Flujo de procesamiento de un caso](#2-flujo-de-procesamiento-de-un-caso)
+3. [Operaciones por tipo de archivo](#3-operaciones-por-tipo-de-archivo)
+4. [Distribución del trabajo](#4-distribución-del-trabajo-relación-con-la-unidad-1)
+5. [Prioridades](#5-prioridades)
+6. [Estados y sincronización](#6-estados-y-sincronización)
+7. [Manejo de fallos](#7-manejo-de-fallos)
+8. [Monitoreo y reacción a la carga](#8-monitoreo-y-reacción-a-la-carga)
+9. [Almacenamiento de resultados y reporte](#9-almacenamiento-de-resultados-y-reporte)
+10. [Base de datos](#10-base-de-datos)
+11. [API](#11-api)
+12. [Relación con los temas del curso](#12-relación-con-los-temas-del-curso)
+
+---
+
+## Resumen
+
+El usuario envía un **caso**: un conjunto de archivos relacionados, por ejemplo el material de un evento (videos, canciones y fotografías). El **coordinador** analiza cada archivo, determina las operaciones que corresponden según su tipo y divide el caso en **sub-tareas**. Las sub-tareas se publican en **colas** de RabbitMQ. Cuatro **workers**, ubicados en cuatro computadoras distintas, consumen sub-tareas de esas colas y las procesan **de forma concurrente** con FFmpeg. Cuando finalizan **todas** las sub-tareas del caso, el coordinador lo cierra y genera un **reporte consolidado**. Un **dashboard** web muestra el estado del sistema en tiempo real.
+
+## Glosario
+
+| Término | Definición |
+|---|---|
+| **Caso** | Solicitud del usuario compuesta por uno o varios archivos que se procesan en conjunto. Es **homogéneo** si todos los archivos son del mismo tipo y **heterogéneo** si combina video, audio e imágenes. |
+| **Sub-tarea** | Operación sobre un archivo, por ejemplo la conversión de un video a MKV. Un caso genera varias. |
+| **Coordinador** | Programa central (`coordinador/app.py`). Recibe los casos, distribuye el trabajo, consolida los resultados y sirve el dashboard. |
+| **Worker** | Programa (`worker/worker.py`) que se ejecuta en cada computadora y realiza el procesamiento. |
+| **Cola** | Estructura de RabbitMQ donde las sub-tareas esperan hasta que un worker las consume. |
+| **Pool** | Cada una de las tres colas de trabajo, clasificadas por tipo de carga: video, audio o ligera. |
+| **Heartbeat** | Mensaje periódico (cada 5 segundos) con el que cada worker confirma que sigue activo y reporta su uso de CPU y RAM. |
+| **Barrier/join** | Mecanismo de sincronización que impide cerrar un caso hasta que todas sus sub-tareas hayan finalizado. |
+| **FFmpeg** | Herramienta de conversión y análisis de audio y video. |
+
+---
+
+## 1. Componentes
+
+```mermaid
+flowchart LR
+    subgraph Clientes
+        CLI[cliente.py<br/>envío y carga]
+        WEB[Dashboard web<br/>carga de archivos]
+    end
+
+    subgraph Coordinador["Computadora del coordinador"]
+        API[Coordinador<br/>FastAPI]
+        RMQ[(RabbitMQ<br/>colas)]
+        PG[(PostgreSQL<br/>estado)]
+        REPO[/Archivos:<br/>uploads y results/]
+    end
+
+    subgraph Workers["Computadoras de los workers"]
+        W1[worker-1]
+        W2[worker-2]
+        W3[worker-3]
+        W4[worker-4]
+    end
+
+    CLI -- envía casos --> API
+    WEB -- envía casos y consulta --> API
+    API -- publica sub-tareas --> RMQ
+    RMQ -- entrega sub-tareas --> W1 & W2 & W3 & W4
+    W1 & W2 & W3 & W4 -- reportan el estado --> RMQ
+    RMQ -- mensajes de estado --> API
+    W1 & W2 & W3 & W4 -- descargan originales, envían resultados<br/>y heartbeats --> API
+    API --- PG
+    API --- REPO
+```
+
+| Componente | Tecnología | Función |
+|---|---|---|
+| **Coordinador** | Python + FastAPI | Recibe los casos, determina las operaciones de cada archivo, distribuye el trabajo, consolida los resultados, genera los reportes y sirve el dashboard |
+| **Colas** | RabbitMQ | Almacena las sub-tareas pendientes hasta que un worker las consume. Hay tres colas de trabajo (`tareas.video`, `tareas.audio`, `tareas.ligera`) y una de resultados (`results`) |
+| **Base de datos** | PostgreSQL | Almacena el estado de casos, sub-tareas y workers, y el historial de CPU y RAM |
+| **Workers** | Python + FFmpeg (con o sin Docker) | Consumen sub-tareas, las procesan y reportan el resultado |
+| **Archivos** | Directorios del coordinador | `uploads/` contiene los originales; `results/` contiene los resultados y el reporte de cada caso |
+| **Dashboard** | Página web del coordinador | Envío de casos y monitoreo en tiempo real |
+| **Cliente** | `cliente/cliente.py` | Envío de casos desde la terminal, generación de carga y medición de tiempos |
+
+**Comunicación:** toda la comunicación se realiza **por red**. Los workers no comparten disco con el coordinador.
+
+- Mediante **RabbitMQ** (puerto 5672) reciben las sub-tareas y reportan su estado.
+- Mediante **HTTP** (puerto 8000) descargan el archivo original, envían el resultado, informan el porcentaje de avance y envían el heartbeat.
+
+**Despliegue:** RabbitMQ, PostgreSQL y el coordinador se ejecutan en una misma computadora, que también ejecuta worker-1. Los otros tres workers se ejecutan en tres computadoras adicionales: dos en la red local del TEC (worker-2 y worker-3) y una en otra red, conectada mediante la VPN Tailscale (worker-4).
+
+---
+
+## 2. Flujo de procesamiento de un caso
+
+1. El usuario envía los archivos desde el dashboard o con el cliente.
+2. El coordinador los almacena en `uploads/<caso>/`.
+3. Identifica el tipo de cada archivo y determina sus sub-tareas ([sección 3](#3-operaciones-por-tipo-de-archivo)).
+4. Registra el caso y las sub-tareas en la base de datos.
+5. Publica cada sub-tarea en la cola correspondiente, con la prioridad del caso.
+6. Un worker disponible consume una sub-tarea y notifica el cambio de estado a **asignada**.
+7. El worker descarga el archivo original y notifica el estado **en proceso**. Durante el procesamiento informa el porcentaje de avance.
+8. Al finalizar, envía el resultado al coordinador y notifica el estado **completada** o **fallida**, con el motivo del error.
+9. Solo entonces confirma a RabbitMQ (ACK) que la sub-tarea fue procesada. Si el worker falla antes de ese punto, la sub-tarea regresa a la cola.
+10. El coordinador actualiza la sub-tarea. Si era **la última** del caso, cierra el caso y genera el reporte.
+
+```mermaid
+sequenceDiagram
+    participant C as Cliente
+    participant K as Coordinador
+    participant Q as RabbitMQ
+    participant W as Worker
+
+    C->>K: envía el caso (archivos + prioridad)
+    K->>K: determina las sub-tareas de cada archivo
+    K->>Q: publica las sub-tareas
+    Q->>W: entrega una sub-tarea
+    W->>Q: estado: asignada
+    W->>K: descarga el archivo original
+    W->>Q: estado: en proceso (+ % de avance)
+    W->>K: envía el resultado
+    W->>Q: estado: completada
+    Q->>K: entrega los mensajes de estado
+    K->>K: si es la última sub-tarea, cierra el caso y genera el reporte
+```
+
+---
+
+## 3. Operaciones por tipo de archivo
+
+El coordinador determina las operaciones según la **extensión** del archivo (función `determine_subtasks`):
+
+| Tipo de archivo | Operaciones | Cola |
+|---|---|---|
+| **Video** (mp4, mkv, avi, mov) | 3 sub-tareas: **conversión** de formato (mp4 → mkv; mkv, avi, mov → mp4), **extracción del audio** a mp3 y selección de una **portada** | video |
+| **Audio sin comprimir** (wav, flac, ogg) | **Conversión** a mp3 | audio |
+| **Canción mp3** | Búsqueda de **metadatos**: álbum, fecha, género, versión y letra | ligera |
+| **Imagen** (jpg, png) | Generación de una **miniatura** de 320 px | ligera |
+| **Otro formato** (txt, pdf…) | Ninguna: el archivo se marca como **formato no soportado** y no ocupa ningún worker | — |
+
+Un caso heterogéneo genera sub-tareas de distinto tipo y costo, que se procesan en paralelo en distintas computadoras.
+
+### 3.1 Selección de la portada de un video
+
+La portada no se toma de un cuadro arbitrario. El worker aplica el siguiente procedimiento con FFmpeg:
+
+1. Analiza **5 posiciones** del video (10 %, 30 %, 50 %, 70 % y 90 % de su duración).
+2. En cada posición evalúa 60 cuadros consecutivos con el filtro `thumbnail` de FFmpeg, que selecciona el **más representativo**: el más cercano al color promedio de la escena. De esta forma se descartan transiciones, fundidos y cuadros borrosos.
+3. Entre los 5 candidatos selecciona el de **mayor nivel de detalle**: los codifica en JPEG y elige el archivo de mayor tamaño. Una imagen negra, blanca o uniforme se comprime mucho y produce un archivo pequeño; una imagen con personas o escenario, no.
+
+El reporte indica el segundo del video del que se extrajo la portada.
+
+### 3.2 Búsqueda de metadatos de una canción
+
+Para cada archivo mp3 se combinan varias fuentes:
+
+| Fuente | Información obtenida |
+|---|---|
+| **ffprobe** (parte de FFmpeg, local) | Datos técnicos: duración, calidad, formato, y el título y artista incluidos en el archivo |
+| **iTunes Search API** (servicio público y gratuito) | A partir del título y el artista: **álbum, fecha, género, número de pista y carátula** |
+| **MusicBrainz** (base de datos musical abierta) | La misma información, como respaldo cuando iTunes no encuentra la canción |
+| **lyrics.ovh** (servicio público) | La **letra** de la canción |
+
+También se detecta si se trata de una **versión** acústica, en vivo, remix o instrumental. El reporte lo resume de esta forma: *Álbum: Parachutes (2000) · Género: Alternative · Letra: sí · Fuente: iTunes*. Si no hay conexión a internet o la canción no existe en esos servicios, **la sub-tarea no falla**: entrega los datos técnicos e indica que no hubo coincidencia.
+
+### 3.3 Metadatos del caso
+
+Cada caso puede incluir información adicional (evento, sesión, usuario, lote y datos de cada archivo, como título o autor). Esta información se almacena con el caso y se incluye en el reporte.
+
+---
+
+## 4. Distribución del trabajo (relación con la Unidad 1)
+
+### Decisión de diseño: workers genéricos y colas por tipo de carga
+
+**Los cuatro workers pueden ejecutar cualquier operación**: conversión de video, conversión de audio, miniaturas o metadatos. Sin embargo, las sub-tareas no se publican en una única cola, sino en **tres colas según su costo computacional**:
+
+| Cola | Operaciones | Costo |
+|---|---|---|
+| `video` | Conversión de video, extracción de audio, portada | **Alto**: utiliza toda la CPU disponible; tarda desde segundos hasta varios minutos |
+| `audio` | Conversión de wav, flac u ogg a mp3 | Medio |
+| `ligera` | Miniaturas y metadatos | Bajo: milisegundos o pocos segundos |
+
+Cada worker consume de las tres colas.
+
+### Justificación de los workers genéricos
+
+Las cuatro computadoras del equipo son de uso personal y ninguna tiene una ventaja de hardware clara, como una GPU dedicada, que justifique asignarle un tipo de trabajo exclusivo. Además, la composición de la carga varía mucho entre casos: un caso puede contener casi solo imágenes y el siguiente casi solo video.
+
+- **Ningún worker queda inactivo** mientras exista trabajo de cualquier tipo.
+- **Si una computadora falla, las demás continúan con todo el trabajo**, porque todas pueden ejecutar cualquier operación. Con un único worker dedicado a video, una falla de ese equipo dejaría los videos pendientes de forma indefinida.
+- **El despliegue es más simple:** los cuatro workers se ejecutan con la misma configuración.
+
+### Justificación de las tres colas
+
+En la Unidad 1 se estudió que no todo el trabajo aprovecha los recursos de la misma forma: una GPU es adecuada para ciertas cargas y una NPU para otras. En este proyecto ocurre algo similar: la conversión de video es muy costosa, mientras que una miniatura casi no consume recursos. Separar las sub-tareas en colas cumple tres objetivos:
+
+- **Evitar que las tareas cortas esperen detrás de las largas.** Con una única cola, una miniatura de un segundo podría quedar detrás de cinco videos de 10 minutos. Con colas separadas, el primer worker disponible la procesa de inmediato.
+- **Identificar cuellos de botella.** El dashboard muestra cuántas sub-tareas esperan en cada cola.
+- **Permitir la especialización a futuro.** Si se incorporara una computadora considerablemente más potente, podría dedicarse solo a video (`WORKER_POOLS=video WORKER_CONCURRENCY=2`) sin otros cambios. La comparación de ambas configuraciones con datos queda como prueba pendiente (ver el Informe de pruebas).
+
+### Balanceo de carga
+
+- RabbitMQ entrega a cada worker **una sola sub-tarea a la vez** (o la cantidad definida en `WORKER_CONCURRENCY`). La siguiente sub-tarea se entrega al primer worker que finaliza, por lo que **el worker más rápido procesa más tareas** sin necesidad de una asignación manual.
+- Si un worker alcanza un uso de CPU elevado, deja de solicitar trabajo temporalmente ([sección 8](#8-monitoreo-y-reacción-a-la-carga)).
+
+> [!NOTE]
+> **Detalle técnico:** se utiliza `prefetch_count = WORKER_CONCURRENCY` con QoS global por canal. Cada sub-tarea se procesa en un hilo independiente, y el hilo principal atiende la conexión con RabbitMQ.
+
+---
+
+## 5. Prioridades
+
+Cada caso tiene una prioridad de **1 (baja) a 10 (alta)**. Las colas de RabbitMQ respetan esa prioridad: **un caso urgente que llega después se procesa antes** que los casos que ya estaban en espera.
+
+> [!NOTE]
+> **Detalle técnico:** colas durables con `x-max-priority = 10` y mensajes persistentes, de modo que no se pierden si RabbitMQ se reinicia.
+
+---
+
+## 6. Estados y sincronización
+
+### Estados de una sub-tarea
+
+| Estado | Descripción |
+|---|---|
+| `pendiente` | En la cola, a la espera de un worker |
+| `asignada` | Un worker la consumió |
+| `en proceso` | El worker descargó el archivo y la está procesando (muestra el porcentaje) |
+| `completada` | Finalizó correctamente |
+| `fallida` | No se pudo procesar (archivo dañado, formato no soportado…) |
+| `reintentando` | Falló por un problema transitorio (por ejemplo, de red) y se volverá a intentar |
+| `en pausa` | El caso está pausado: la sub-tarea espera a que se reanude |
+| `cancelada` | El usuario canceló el caso |
+
+```mermaid
+stateDiagram-v2
+    [*] --> pendiente
+    pendiente --> asignada: un worker la consume
+    asignada --> en_proceso: archivo descargado
+    en_proceso --> completada
+    en_proceso --> fallida: archivo dañado
+    en_proceso --> reintentando: error de red
+    reintentando --> pendiente: regresa a la cola
+    en_proceso --> asignada: falla del worker, otro la consume
+    asignada --> en_pausa: caso pausado
+    en_pausa --> pendiente: caso reanudado
+    pendiente --> cancelada
+    en_proceso --> cancelada
+```
+
+### Estados de un caso
+
+| Estado | Descripción |
+|---|---|
+| `en cola` | Recién registrado |
+| `en proceso` | Tiene sub-tareas sin finalizar |
+| `reintentando` | Tiene sub-tareas sin finalizar y al menos una en espera de reintento |
+| `en pausa` | El usuario lo pausó: las sub-tareas en ejecución finalizan y las demás esperan |
+| `completado` | Todas las sub-tareas finalizaron **correctamente** |
+| `parcialmente completado` | Todas las sub-tareas finalizaron y **al menos una falló** |
+| `fallido` | Todas las sub-tareas finalizaron y **ninguna fue exitosa** |
+| `cancelado` | El usuario lo canceló |
+
+### Barrier/join: cierre de un caso
+
+Las sub-tareas de un caso finalizan en cualquier orden y en distintas computadoras: una puede tardar 1 segundo y otra 20 minutos. El coordinador **no puede cerrar el caso hasta que finalicen todas**; esa espera constituye la **barrera**. Cuando se cumple, el coordinador **consolida** los resultados (*join*), determina el estado final y genera el reporte.
+
+Por cada mensaje de estado recibido de un worker, el coordinador:
+
+1. Verifica que la sub-tarea no estuviera ya en un estado final. Si lo estaba, descarta el mensaje por duplicado (por ejemplo, el de una sub-tarea redistribuida).
+2. Actualiza la sub-tarea.
+3. Cuenta cuántas sub-tareas del caso han finalizado.
+4. Si finalizaron **todas**, cierra el caso y genera el reporte. En caso contrario, espera el siguiente mensaje.
+
+> [!NOTE]
+> **Detalle técnico:** cada mensaje se procesa en una transacción que bloquea la fila del caso (`SELECT … FOR UPDATE`), de modo que dos mensajes simultáneos no produzcan condiciones de carrera. La lógica está en `refresh_case_status`.
+
+---
+
+## 7. Manejo de fallos
+
+| Situación | Respuesta del sistema |
+|---|---|
+| **Falla de un worker** durante una sub-tarea | Como la sub-tarea no fue confirmada (ACK), RabbitMQ **la entrega a otro worker**. Queda registrada como redistribuida. |
+| **Falla temporal de red** | La sub-tarea pasa a `reintentando` y se vuelve a intentar a los 5 s y luego a los 10 s. Si el error persiste, queda como fallida. |
+| **Archivo dañado** | Falla de forma definitiva, ya que un reintento no lo corregiría. |
+| **Mensaje duplicado** | Se descarta. |
+| **Cancelación** de un caso | Las sub-tareas que no iniciaron ya no se procesan. Si un worker consume una de ellas, el coordinador le indica que el caso está cancelado y el worker la descarta. |
+| **Pausa** de un caso | Las sub-tareas en ejecución finalizan. Si un worker consume una sub-tarea de ese caso, el coordinador le indica que el caso está en pausa y el worker la devuelve sin procesarla, con lo que queda disponible para otros casos. Al **reanudar**, el coordinador vuelve a publicar solo las sub-tareas devueltas; las que nunca salieron de la cola permanecen en ella, por lo que ninguna se procesa dos veces. |
+| **Ausencia de heartbeat** durante 15 s | El worker se muestra como **desconectado**. |
+| **Sub-tareas de larga duración** (videos de 500 MB) | Por defecto, RabbitMQ devuelve a la cola cualquier mensaje sin confirmar después de 30 minutos. Al iniciar, el coordinador amplía ese límite a 4 horas para evitar que las conversiones largas se repitan. |
+| **Archivos de gran tamaño** | Se transfieren **por bloques** de 1 MB, nunca completos en memoria, para no saturar la RAM. |
+
+---
+
+## 8. Monitoreo y reacción a la carga
+
+**Métricas:** cada worker envía cada 5 segundos su uso de **CPU y RAM**, la cantidad de tareas en ejecución y los datos de su equipo (procesador, núcleos, RAM). El coordinador almacena el estado actual y el historial. Además, registra **la dirección IP de origen de cada worker**, lo que evidencia que se ejecutan en computadoras distintas.
+
+**Reacción:** si un worker supera el **80 % de CPU** en dos mediciones consecutivas, **deja de solicitar trabajo nuevo** y se muestra como **saturado**. RabbitMQ entrega entonces las sub-tareas a los demás workers. Cuando el uso baja del **60 %**, el worker vuelve a solicitar trabajo.
+
+**Información del dashboard:**
+
+- Tarjetas con totales: casos, workers activos y archivos procesados.
+- Cantidad de sub-tareas en espera en cada cola.
+- Workers: IP, equipo, estado, CPU, RAM y tareas procesadas.
+- Casos, con su avance y su detalle.
+- Gráficos de la variedad de archivos (tipos, formatos y tamaños).
+- Trazabilidad: un mapa de qué worker procesó cada archivo y una línea de tiempo que muestra las sub-tareas ejecutadas en paralelo.
+
+---
+
+## 9. Almacenamiento de resultados y reporte
+
+- **Originales:** `uploads/<caso>/`. Los workers los descargan del coordinador.
+- **Resultados:** los workers los envían al coordinador y se almacenan en `results/<caso>/`. Se descargan desde el dashboard o con el cliente.
+- **Justificación del almacenamiento central:** el coordinador es el único equipo que permanece encendido durante toda la ejecución, por lo que los resultados se pueden recuperar aunque un worker se apague. Además, no es necesario configurar directorios compartidos entre computadoras.
+- **Reporte del caso:** se genera cuando el caso finaliza. Incluye:
+  - fechas de inicio y fin;
+  - un **resumen de una línea**, por ejemplo: *De 15 archivos — 4 videos convertidos, 6 miniaturas generadas…; 1 fallido por formato no soportado*;
+  - el resultado de cada sub-tarea, con su worker y sus tiempos;
+  - la carga procesada por cada worker;
+  - los errores y los metadatos.
+- El reporte se puede consultar como página web imprimible, descargar en JSON, y se guarda en `results/<caso>/reporte_<caso>.json`.
+
+---
+
+## 10. Base de datos
+
+```mermaid
+erDiagram
+    cases ||--o{ subtasks : contiene
+    workers ||--o{ resource_logs : reporta
+    workers ||--o{ subtasks : procesa
+
+    cases {
+        varchar case_id PK
+        varchar case_name
+        int priority
+        varchar status
+        int total_subtasks
+        jsonb metadata
+        timestamp created_at
+        timestamp finished_at
+    }
+    subtasks {
+        varchar subtask_id PK
+        varchar case_id FK
+        varchar file_name
+        varchar file_type
+        bigint file_size
+        varchar operation
+        varchar pool
+        varchar status
+        decimal progress
+        varchar assigned_worker
+        int retries
+        int reassignments
+        jsonb result_info
+        timestamp started_at
+        timestamp finished_at
+    }
+    workers {
+        varchar worker_id PK
+        varchar host_address
+        jsonb machine
+        varchar status
+        decimal cpu_usage
+        decimal memory_usage
+        int active_tasks
+        timestamp last_heartbeat
+    }
+    resource_logs {
+        serial id PK
+        varchar worker_id FK
+        decimal cpu_usage
+        decimal memory_usage
+        timestamp recorded_at
+    }
+```
+
+| Tabla | Contenido |
+|---|---|
+| `cases` | Un registro por caso |
+| `subtasks` | Un registro por sub-tarea, con su estado, worker, tiempos y resultado |
+| `workers` | Estado actual de cada worker |
+| `resource_logs` | Historial de uso de CPU y RAM |
+
+Si la base de datos se creó con una versión anterior, el coordinador agrega automáticamente las columnas faltantes al iniciar.
+
+---
+
+## 11. API
+
+El coordinador expone los siguientes endpoints. La documentación interactiva está disponible en `http://<coordinador>:8000/docs`.
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `POST` | `/api/cases` | Envía un caso (archivos, nombre, prioridad 1–10 y metadatos opcionales) |
+| `GET` | `/api/cases` | Lista los casos |
+| `GET` | `/api/cases/{id}` | Consulta un caso y sus sub-tareas |
+| `POST` | `/api/cases/{id}/pause` · `/api/cases/{id}/resume` | Pausa o reanuda un caso |
+| `POST` | `/api/cases/{id}/cancel` | Cancela un caso |
+| `DELETE` | `/api/cases/{id}` | Elimina un caso y sus archivos |
+| `GET` | `/api/cases/{id}/report` | Reporte en JSON |
+| `GET` | `/cases/{id}/reporte` | Reporte como página web |
+| `GET` | `/api/stats` | Totales y estado de las colas |
+| `GET` | `/api/workers` | Lista de workers |
+| `GET` | `/api/dataset` | Datos de los gráficos de variedad |
+| `GET` | `/api/trace` | Datos de trazabilidad |
+| `GET` | `/api/results/{sub-tarea}` | Descarga un resultado |
+| *(workers)* | `/api/workers/heartbeat`, `/api/files/...`, `/api/results/{id}/raw`, `/api/subtasks/{id}/progress` | Heartbeat, descarga de originales, envío de resultados y reporte de avance |
+
+---
+
+## 12. Relación con los temas del curso
+
+| Tema del curso | Aplicación en el proyecto |
+|---|---|
+| Procesos | Cada worker es un proceso independiente en otra computadora; FFmpeg se ejecuta como proceso hijo |
+| Estados de trabajos | Estados de sub-tarea y de caso ([sección 6](#6-estados-y-sincronización)) |
+| Planificación | Operaciones por tipo de archivo, colas por tipo de carga y prioridades |
+| Colas | RabbitMQ, con prioridad y confirmación al finalizar |
+| Concurrencia | Varias sub-tareas y varios casos procesados de forma simultánea |
+| Sincronización | Barrier/join: el caso se cierra solo cuando finalizan todas sus sub-tareas |
+| Comunicación entre procesos | Mensajes por RabbitMQ y solicitudes HTTP, siempre por red |
+| Recursos y heterogeneidad | Colas según el costo de la tarea; pausa automática ante CPU elevada |
+| Monitoreo y balanceo | Heartbeats, dashboard y asignación al primer worker disponible |
+| Sistemas distribuidos | Cuatro computadoras (una conectada por VPN), tolerancia a fallos y redistribución de tareas |
+| Archivos | Repositorio de originales y resultados, reportes y metadatos |
