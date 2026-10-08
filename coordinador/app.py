@@ -625,7 +625,10 @@ def list_cases():
                COUNT(s.*) FILTER (WHERE s.status = 'completed')                 AS n_completed,
                COUNT(s.*) FILTER (WHERE s.status = 'failed')                    AS n_failed,
                COUNT(s.*) FILTER (WHERE s.status = 'cancelled')                 AS n_cancelled,
-               COUNT(s.*) FILTER (WHERE s.status = 'paused')                    AS n_paused
+               COUNT(s.*) FILTER (WHERE s.status = 'paused')                    AS n_paused,
+               (SELECT SUM(f.size) FROM (
+                    SELECT MAX(file_size) AS size FROM subtasks
+                    WHERE case_id = c.case_id GROUP BY file_name) f)             AS total_bytes
         FROM cases c LEFT JOIN subtasks s ON s.case_id = c.case_id
         GROUP BY c.case_id ORDER BY c.created_at DESC
     """)
@@ -1477,12 +1480,12 @@ def get_trace(case_id: str | None = None, last_cases: int = 5):
         case_ids = [r["case_id"] for r in cur.fetchall()]
 
     cur.execute("""
-        SELECT c.case_id, c.case_name, s.subtask_id, s.file_name, s.file_type, s.pool, s.progress,
+        SELECT c.case_id, c.case_name, s.subtask_id, s.file_name, s.file_type, s.pool, s.progress, s.file_size,
                s.operation, s.target_format, s.status, s.assigned_worker,
                s.error_message, s.started_at, s.finished_at
         FROM subtasks s JOIN cases c ON c.case_id = s.case_id
         WHERE s.case_id = ANY(%s)
-        ORDER BY c.created_at, s.created_at, s.subtask_id
+        ORDER BY c.created_at, s.file_name, s.created_at, s.subtask_id
     """, (case_ids,))
     subtasks = cur.fetchall()
 
@@ -1831,7 +1834,7 @@ def dashboard():
         <h2>Casos de procesamiento</h2>
         <div class="table-wrap">
         <table id="cases-table">
-            <thead><tr><th>ID</th><th>Nombre</th><th>Estado</th><th>Progreso</th><th>Prioridad</th><th>Creado</th><th></th></tr></thead>
+            <thead><tr><th>ID</th><th>Nombre</th><th>Estado</th><th>Progreso</th><th>Prioridad</th><th>Tamaño</th><th>Creado</th><th></th></tr></thead>
             <tbody></tbody>
         </table>
         </div>
@@ -2058,6 +2061,7 @@ def dashboard():
                             <span class="breakdown" >
                                 ${caseBreakdown(c)}</span></td>
                         <td>${c.priority}</td>
+                        <td style="white-space:nowrap">${c.total_bytes != null ? fmtBytes(Number(c.total_bytes)) : '-'}</td>
                         <td>${c.created_at ? new Date(c.created_at).toLocaleString() : ''}</td>
                         <td style="white-space:nowrap">${['queued', 'processing', 'retrying'].includes(c.status)
                             ? `<button class="btn-pause" title="Pausar: lo que está corriendo termina, lo demás espera" onclick="event.stopPropagation(); pauseCase(this, '${c.case_id}', 'pause')">Pausar</button>` : ''}${
@@ -2473,7 +2477,7 @@ def dashboard():
                     const fk = s.case_id + '/' + s.file_name;
                     if (!(fk in fileIdx)) {
                         fileIdx[fk] = c.files.length;
-                        c.files.push({ name: s.file_name, subs: [] });
+                        c.files.push({ name: s.file_name, size: s.file_size, subs: [] });
                     }
                     s._y = y + rowH / 2;
                     y += rowH;
@@ -2529,7 +2533,9 @@ def dashboard():
                         tx = 24;
                     }
                     const maxChars = Math.floor((w - tx - 6) / 6.6);
-                    g.appendChild(el('text', { x: tx, y: opts.sub ? h / 2 - 3 : h / 2 + 4, fill: '#164e63', 'font-size': 12, 'font-weight': opts.bold ? 600 : 400 }, trunc(label, maxChars)));
+                    const sufijo = opts.suffix || '';
+                    g.appendChild(el('text', { x: tx, y: opts.sub ? h / 2 - 3 : h / 2 + 4, fill: '#164e63', 'font-size': 12, 'font-weight': opts.bold ? 600 : 400 },
+                        trunc(label, Math.max(6, maxChars - sufijo.length)) + sufijo));
                     if (opts.sub) g.appendChild(el('text', { x: tx, y: h / 2 + 11, fill: '#4b8a99', 'font-size': 10.5 }, trunc(opts.sub, maxChars + 2)));
                     if (opts.title) g.appendChild(el('title', {}, opts.title));
                     reg(g, opts.set);
@@ -2566,12 +2572,17 @@ def dashboard():
                                 strokeW: s.status === 'failed' ? 1.5 : 1
                             });
                         });
-                        const fsub = f.subs.length === 1 ? '1 sub-tarea' : `${f.subs.length} sub-tareas`;
+                        const tam = f.size != null ? fmtBytes(Number(f.size)) : null;
+                        const fsub = `${tam ? tam + ' · ' : ''}${f.subs.length} sub-tareas`;
                         node(colX[1], fy, colW[1], f.subs.length > 1 ? 34 : nodeH, f.name, {
-                            set: fset, title: f.name, sub: f.subs.length > 1 ? fsub : null
+                            set: fset, title: `${f.name}${tam ? ' (' + tam + ')' : ''}`,
+                            sub: f.subs.length > 1 ? fsub : null,
+                            suffix: f.subs.length === 1 && tam ? ` · ${tam}` : ""
                         });
                     });
-                    node(colX[0], cy, colW[0], 36, c.name, { set: cset, fill: '#ecfeff', bold: true, sub: c.id, title: `${c.name} (${c.id})` });
+                    const totalCaso = c.files.reduce((a, f) => a + (Number(f.size) || 0), 0);
+                    const subCaso = totalCaso ? `${c.id} · ${fmtBytes(totalCaso)}` : c.id;
+                    node(colX[0], cy, colW[0], 36, c.name, { set: cset, fill: '#ecfeff', bold: true, sub: subCaso, title: `${c.name} (${c.id})` });
                 });
 
                 wcol.forEach(w => {
