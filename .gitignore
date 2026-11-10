@@ -12,6 +12,8 @@ workspace/
 # Dataset generado (se recrea con scripts/generar_dataset.py) y salidas de pruebas
 dataset_prueba/
 dataset_real/
+dataset_whatsapp/
+exportados/
 resultados_descargados/
 
 # Editor / sistema

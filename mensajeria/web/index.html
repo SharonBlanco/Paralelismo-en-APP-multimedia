@@ -1,0 +1,1333 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marea · Inteligencia conversacional</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* Paleta base */
+  --blanco: #FFFFFF;
+  --fondo: #F3FAF8;
+  --agua: #A7DED0;
+  --menta: #65BFA8;
+  --petroleo: #236B60;
+  --texto: #263B38;
+  --texto-2: #82938F;
+  --borde: #E1ECE8;
+  /* Derivados de la paleta */
+  --agua-suave: #E8F6F1;
+  --agua-hielo: #F7FCFA;
+  --petroleo-hover: #1C5950;
+  --borde-fuerte: #CFDFD9;
+  /* Rampa secuencial (un solo tono, claro → oscuro) */
+  --s0: #F3F8F6; --s1: #D6EEE6; --s2: #A7DED0; --s3: #65BFA8; --s4: #3D9483; --s5: #236B60;
+  /* Estados (reservados) */
+  --aviso-fondo: #FDF7EA; --aviso-borde: #F0DDB3; --aviso-texto: #8A5A0B;
+  --error-fondo: #FDF1F0; --error-borde: #F3CFCB; --error-texto: #A3271B;
+  --radio: 6px;
+  --fuente: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --fuente-titulo: "Newsreader", Georgia, "Times New Roman", serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { font: 14px/1.5 var(--fuente); background: var(--fondo); color: var(--texto);
+  -webkit-font-smoothing: antialiased; }
+a { color: var(--petroleo); text-decoration: none; }
+a:hover { text-decoration: underline; }
+svg.i { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.6;
+  stroke-linecap: round; stroke-linejoin: round; }
+.mono { font-family: var(--mono); font-size: 12px; color: var(--texto-2); }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------ estructura */
+.app { display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }
+.sidebar { background: var(--blanco); border-right: 1px solid var(--borde); display: flex;
+  flex-direction: column; position: sticky; top: 0; height: 100vh; }
+.marca { display: flex; align-items: center; gap: 10px; padding: 20px 20px 18px; }
+.marca-nombre { font-weight: 700; font-size: 15px; letter-spacing: -.01em; line-height: 1.1; }
+.marca-sub { font-size: 11.5px; color: var(--texto-2); }
+.nav { padding: 6px 12px; flex: 1; overflow: auto; }
+.nav-grupo { font-size: 11px; font-weight: 600; color: var(--texto-2); text-transform: uppercase;
+  letter-spacing: .06em; padding: 14px 10px 6px; }
+.nav-caso { padding: 0 10px 6px; font-size: 12.5px; font-weight: 600; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.nav a { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: var(--radio);
+  color: var(--texto); font-weight: 500; font-size: 13.5px; margin-bottom: 1px; }
+.nav a:hover { background: var(--agua-hielo); text-decoration: none; }
+.nav a svg { color: var(--texto-2); }
+.nav a.activo { background: var(--agua-suave); color: var(--petroleo); font-weight: 600; }
+.nav a.activo svg { color: var(--petroleo); }
+.nav-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.nav a .cuenta { margin-left: auto; font-size: 11.5px; color: var(--texto-2); font-weight: 500; }
+.nav-grupo-fila { display: flex; justify-content: space-between; align-items: center; padding-right: 4px; }
+.nav-mas { border: 0; background: none; color: var(--texto-2); cursor: pointer; padding: 3px; border-radius: 4px; display: grid; place-items: center; }
+.nav-mas:hover { background: var(--fondo); color: var(--petroleo); }
+.nav-mas svg { width: 14px; height: 14px; }
+.nueva-carpeta { padding: 2px 4px 6px; }
+.nueva-carpeta input { font-size: 13px; padding: 6px 9px; }
+.config { border-top: 1px solid var(--borde); padding: 10px 12px 16px; }
+.config .nav { padding: 0; }
+.config .local { display: flex; gap: 8px; padding: 8px 10px 0; font-size: 11.5px; color: var(--texto-2); line-height: 1.4; }
+.config .local svg { width: 14px; height: 14px; margin-top: 1px; }
+
+.main { min-width: 0; }
+.contenido { max-width: 1180px; margin: 0 auto; padding: 32px 40px 56px; }
+.migas { font-size: 12.5px; color: var(--texto-2); margin-bottom: 10px; display: flex; gap: 6px; align-items: center; }
+.migas a { color: var(--texto-2); }
+.cabecera { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start;
+  margin-bottom: 28px; }
+h1 { font-family: var(--fuente-titulo); font-weight: 500; font-size: 30px; line-height: 1.15;
+  letter-spacing: -.01em; margin: 0 0 6px; }
+.subtitulo { color: var(--texto-2); margin: 0; max-width: 640px; }
+.meta-linea { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--texto-2); font-size: 13px; align-items: center; }
+h2 { font-size: 14px; font-weight: 600; margin: 0; }
+.panel-desc { font-size: 12.5px; color: var(--texto-2); margin: 2px 0 0; }
+
+/* ------------------------------------------------ piezas */
+.panel { background: var(--blanco); border: 1px solid var(--borde); border-radius: var(--radio); }
+.tabla-scroll { overflow-x: auto; }
+td.fecha { white-space: nowrap; }
+.panel-cab { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  padding: 16px 20px 0; }
+.panel-cuerpo { padding: 16px 20px 20px; }
+.rejilla { display: grid; gap: 20px; }
+.r-2 { grid-template-columns: 3fr 2fr; }
+.r-11 { grid-template-columns: 1fr 1fr; }
+.arriba { align-items: start; }
+.pila > * + * { margin-top: 20px; }
+
+.estado { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
+  padding: 2px 9px 2px 8px; border-radius: 99px; background: var(--agua-suave); color: var(--petroleo); }
+.estado::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--menta); }
+.etiqueta { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 1px 7px; border-radius: 4px;
+  background: var(--fondo); border: 1px solid var(--borde); color: var(--texto); }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; font: 600 13px/1 var(--fuente);
+  padding: 9px 14px; border-radius: var(--radio); border: 1px solid var(--borde-fuerte); background: var(--blanco);
+  color: var(--texto); cursor: pointer; }
+.btn:hover { background: var(--agua-hielo); }
+.btn-primario { background: var(--petroleo); border-color: var(--petroleo); color: var(--blanco); }
+.btn-primario:hover { background: var(--petroleo-hover); }
+.btn-texto { border-color: transparent; background: none; color: var(--texto-2); padding: 8px 10px; }
+.btn-texto:hover { background: var(--fondo); color: var(--texto); }
+.btn-peligro:hover { color: var(--error-texto); background: var(--error-fondo); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-chico { padding: 6px 10px; font-size: 12.5px; }
+
+label.campo { display: block; font-size: 12.5px; font-weight: 600; margin: 0 0 6px; }
+input[type=text], input[type=number], input[type=search], input[type=date], select, textarea {
+  width: 100%; font: 13.5px var(--fuente); color: var(--texto); background: var(--blanco);
+  border: 1px solid var(--borde-fuerte); border-radius: var(--radio); padding: 8px 10px; }
+input:focus, select:focus, textarea:focus, .btn:focus-visible, .zona:focus-visible, .nav a:focus-visible {
+  outline: 2px solid var(--menta); outline-offset: 1px; }
+textarea { min-height: 120px; font: 12px/1.5 var(--mono); resize: vertical; }
+.campos { display: grid; grid-template-columns: 1fr 1fr 110px; gap: 14px; margin-top: 18px; }
+.check { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; margin-top: 18px; padding: 12px 14px;
+  background: var(--agua-hielo); border: 1px solid var(--borde); border-radius: var(--radio); cursor: pointer; }
+.check input { margin: 3px 0 0; accent-color: var(--petroleo); }
+.check-simple { display: flex; gap: 8px; align-items: center; font-size: 13px; margin-top: 12px; }
+.check-simple input { accent-color: var(--petroleo); }
+
+.zona { border: 1px dashed var(--borde-fuerte); border-radius: var(--radio); padding: 28px 20px; text-align: center;
+  background: var(--agua-hielo); cursor: pointer; }
+.zona.sobre { border-color: var(--menta); background: var(--agua-suave); }
+.zona-icono { width: 36px; height: 36px; border-radius: 8px; background: var(--blanco); border: 1px solid var(--borde);
+  display: inline-grid; place-items: center; color: var(--petroleo); margin-bottom: 10px; }
+.zona strong { display: block; font-size: 14px; }
+.zona span { font-size: 12.5px; color: var(--texto-2); }
+.zona-acciones { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
+.seleccion { margin-top: 12px; border: 1px solid var(--borde); border-radius: var(--radio); max-height: 180px; overflow: auto; }
+.seleccion div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 12px; font-size: 12.5px;
+  border-bottom: 1px solid var(--borde); }
+.seleccion div:last-child { border-bottom: 0; }
+.seleccion .total { background: var(--fondo); font-weight: 600; }
+
+.pasos { list-style: none; margin: 0; padding: 0; }
+.paso { display: grid; grid-template-columns: 22px 1fr; gap: 12px; padding-bottom: 18px; position: relative; }
+.paso:not(:last-child)::after { content: ""; position: absolute; left: 10.5px; top: 24px; bottom: 2px; width: 1px; background: var(--borde); }
+.paso-marca { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--borde-fuerte); background: var(--blanco);
+  display: grid; place-items: center; font-size: 11px; font-weight: 700; color: var(--texto-2); }
+.paso.hecho .paso-marca { background: var(--petroleo); border-color: var(--petroleo); color: var(--blanco); }
+.paso.activo .paso-marca { border-color: var(--menta); color: var(--petroleo); box-shadow: 0 0 0 3px var(--agua-suave); }
+.paso.error .paso-marca { border-color: var(--error-texto); color: var(--error-texto); }
+.paso-titulo { font-weight: 600; font-size: 13.5px; }
+.paso-detalle { font-size: 12.5px; color: var(--texto-2); word-break: break-word; }
+
+.aviso, .error { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; border-radius: var(--radio);
+  font-size: 13px; border: 1px solid; }
+.aviso { background: var(--aviso-fondo); border-color: var(--aviso-borde); color: var(--aviso-texto); }
+.error { background: var(--error-fondo); border-color: var(--error-borde); color: var(--error-texto); white-space: pre-wrap; }
+.aviso svg, .error svg { margin-top: 2px; }
+.avisos > * + * { margin-top: 8px; }
+
+/* KPI */
+.kpis { display: grid; grid-template-columns: repeat(6, 1fr); }
+.kpi { padding: 18px 20px; border-left: 1px solid var(--borde); min-width: 0; }
+.kpi:first-child { border-left: 0; }
+.kpi-etq { font-size: 12.5px; color: var(--texto-2); font-weight: 500; }
+.kpi-valor { font-size: 24px; font-weight: 600; letter-spacing: -.02em; margin-top: 4px; line-height: 1.2; white-space: nowrap; }
+.kpi-nota { font-size: 12px; color: var(--texto-2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Tablas */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-size: 12px; font-weight: 600; color: var(--texto-2); padding: 10px 20px;
+  border-bottom: 1px solid var(--borde); white-space: nowrap; }
+td { padding: 11px 20px; border-bottom: 1px solid var(--borde); vertical-align: middle; }
+tr:last-child td { border-bottom: 0; }
+td.der, th.der { text-align: right; }
+tbody tr.clic { cursor: pointer; }
+tbody tr.clic:hover td { background: var(--agua-hielo); }
+td.hash { font-family: var(--mono); font-size: 11.5px; color: var(--texto-2); word-break: break-all; max-width: 360px; }
+.persona { display: flex; align-items: center; gap: 10px; font-weight: 600; white-space: nowrap; }
+.avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--agua-suave); color: var(--petroleo);
+  font-size: 11px; font-weight: 700; display: grid; place-items: center; flex: none; }
+.barra-celda { display: flex; align-items: center; gap: 10px; min-width: 140px; }
+.barra-pista { flex: 1; height: 8px; }
+.barra { height: 8px; background: var(--menta); border-radius: 0 4px 4px 0; min-width: 2px; }
+
+/* Barras horizontales (participantes) */
+.hbarras { display: grid; grid-template-columns: minmax(80px, max-content) 1fr auto; gap: 10px 14px; align-items: center; }
+.hbarras .nombre { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.hbarras .pista { height: 12px; }
+.hbarras .b { height: 12px; background: var(--menta); border-radius: 0 4px 4px 0; min-width: 2px; }
+.hbarras a.nombre { color: var(--texto); }
+.hbarras a.nombre:hover { color: var(--petroleo); }
+.hbarras .v { font-size: 12.5px; color: var(--texto-2); text-align: right; }
+
+/* Gráficos SVG */
+.grafico svg { display: block; width: 100%; overflow: visible; }
+.grafico .rejilla-l { stroke: var(--borde); stroke-width: 1; }
+.grafico .eje-t { font: 11px var(--fuente); fill: var(--texto-2); font-variant-numeric: tabular-nums; }
+.grafico .col { fill: var(--menta); }
+.grafico .golpe { fill: transparent; }
+.grafico .golpe:hover + .col, .grafico g.c:hover .col { fill: var(--s4); }
+.leyenda-sec { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--texto-2); }
+.leyenda-sec i { width: 18px; height: 10px; border-radius: 2px; display: inline-block; }
+details.datos { margin-top: 12px; font-size: 12.5px; overflow-x: auto; }
+details.datos summary { color: var(--texto-2); cursor: pointer; }
+details.datos table { margin-top: 8px; }
+details.datos td, details.datos th { padding: 5px 10px; }
+
+/* Mapa de calor */
+.calor { display: grid; grid-template-columns: 40px repeat(24, 1fr); gap: 3px; }
+.calor .dia { font-size: 11.5px; color: var(--texto-2); align-self: center; }
+.calor .h { font-size: 10.5px; color: var(--texto-2); text-align: center; font-variant-numeric: tabular-nums; }
+.calor .celda { aspect-ratio: 1.6; border-radius: 3px; min-height: 14px; }
+
+/* Datos destacados */
+.hallazgos { display: grid; grid-template-columns: repeat(3, 1fr); }
+.hallazgo { padding: 16px 20px; border-left: 1px solid var(--borde); }
+.hallazgo:first-child { border-left: 0; }
+.hallazgo .kpi-valor { font-size: 18px; }
+
+/* Explorador de mensajes */
+.barra-herr { display: flex; gap: 10px; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--borde); flex-wrap: wrap; }
+.buscador { position: relative; flex: 1; min-width: 220px; }
+.buscador svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--texto-2); }
+.buscador input { padding-left: 32px; }
+.barra-herr select { width: auto; min-width: 170px; }
+.segmentos { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 20px; border-bottom: 1px solid var(--borde); }
+.seg { font: 500 12.5px var(--fuente); padding: 4px 10px; border-radius: 99px; border: 1px solid var(--borde);
+  background: var(--blanco); color: var(--texto); cursor: pointer; }
+.seg b { font-weight: 600; color: var(--texto-2); margin-left: 4px; }
+.seg:hover { border-color: var(--borde-fuerte); }
+.seg.activo { background: var(--agua-suave); border-color: var(--agua); color: var(--petroleo); }
+.seg.activo b { color: var(--petroleo); }
+.contador { font-size: 12.5px; color: var(--texto-2); margin-left: auto; }
+.hilo { padding: 8px 20px 20px; background: var(--agua-hielo); }
+.separador-dia { display: flex; align-items: center; gap: 12px; margin: 18px 0 10px; font-size: 12px; font-weight: 600; color: var(--texto-2); }
+.separador-dia::before, .separador-dia::after { content: ""; height: 1px; background: var(--borde); flex: 1; }
+.mensaje { display: grid; grid-template-columns: 30px 1fr; gap: 10px; padding: 8px 10px; border-radius: var(--radio); }
+.mensaje:hover { background: var(--blanco); }
+.mensaje .avatar { width: 30px; height: 30px; }
+.mensaje-cab { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.mensaje-cab b { font-size: 13.5px; }
+.mensaje-cab .hora { font-size: 12px; color: var(--texto-2); }
+.mensaje-cab .ref { font-family: var(--mono); font-size: 11px; color: var(--texto-2); margin-left: auto; }
+.mensaje-texto { white-space: pre-wrap; word-wrap: break-word; margin-top: 2px; }
+.mensaje-texto.apagado { color: var(--texto-2); font-style: italic; }
+.mensaje.sistema { grid-template-columns: 1fr; text-align: center; font-size: 12.5px; color: var(--texto-2); padding: 4px 10px; }
+.mensaje.sistema:hover { background: none; }
+.adjunto { margin-top: 6px; }
+.adjunto img, .adjunto video { display: block; max-width: min(360px, 100%); max-height: 280px; border-radius: var(--radio); border: 1px solid var(--borde); }
+.adjunto audio { width: 300px; max-width: 100%; height: 36px; }
+.archivo { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border: 1px solid var(--borde);
+  border-radius: var(--radio); background: var(--blanco); font-size: 12.5px; color: var(--texto); }
+.archivo.falta { border-style: dashed; color: var(--texto-2); }
+.archivo small { color: var(--texto-2); }
+mark { background: var(--agua); color: var(--texto); border-radius: 2px; padding: 0 1px; }
+.mas { display: flex; justify-content: center; padding-top: 14px; }
+
+.vacio { text-align: center; padding: 48px 20px; color: var(--texto-2); }
+.vacio h2 { color: var(--texto); font-size: 15px; margin-bottom: 4px; }
+.vacio .btn { margin-top: 16px; }
+pre.json { margin: 0; padding: 16px 20px; font: 12px/1.6 var(--mono); white-space: pre-wrap; word-break: break-word;
+  background: var(--agua-hielo); border-top: 1px solid var(--borde); max-height: 520px; overflow: auto; }
+.lista-def { display: grid; grid-template-columns: 180px 1fr; gap: 10px 20px; font-size: 13px; }
+.lista-def dt { color: var(--texto-2); }
+.lista-def dd { margin: 0; word-break: break-word; }
+
+.filtros { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; padding: 16px 20px; border-bottom: 1px solid var(--borde); }
+.filtros .f { display: flex; flex-direction: column; gap: 5px; min-width: 150px; }
+.filtros .f > label { font-size: 12px; font-weight: 600; color: var(--texto-2); }
+.filtros .f-buscar { flex: 1; min-width: 240px; }
+.acciones-lote { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 20px; background: var(--agua-suave);
+  border-bottom: 1px solid var(--borde); font-size: 13px; }
+.acciones-lote select { width: auto; min-width: 180px; padding: 6px 9px; }
+th.sel, td.sel { width: 40px; padding-right: 0; }
+th.sel input, td.sel input { accent-color: var(--petroleo); width: 15px; height: 15px; }
+.pie-tabla { padding: 11px 20px; font-size: 12.5px; color: var(--texto-2); border-top: 1px solid var(--borde); }
+.acciones-cab { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.input-titulo { font-family: var(--fuente-titulo); font-size: 26px; padding: 2px 10px; max-width: 480px; }
+.etq-carpeta { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--texto); white-space: nowrap; }
+.etq-carpeta svg { width: 14px; height: 14px; color: var(--texto-2); }
+.mover-caso select { width: auto; padding: 2px 6px; font-size: 13px; color: var(--texto-2); border-color: var(--borde); background: transparent; }
+.mover-caso select:hover { border-color: var(--borde-fuerte); color: var(--texto); }
+#tip { position: fixed; pointer-events: none; z-index: 10; background: var(--texto); color: var(--blanco);
+  font-size: 12px; padding: 7px 10px; border-radius: 5px; line-height: 1.4; max-width: 260px; display: none; }
+#tip b { display: block; font-weight: 600; }
+#tip span { color: var(--agua); font-variant-numeric: tabular-nums; }
+
+@media (max-width: 1100px) { .kpis { grid-template-columns: repeat(3, 1fr); } .kpi:nth-child(4) { border-left: 0; }
+  .kpi:nth-child(n+4) { border-top: 1px solid var(--borde); } }
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--borde); }
+  .nav { display: flex; flex-wrap: wrap; gap: 2px; } .nav-grupo, .nav-caso { width: 100%; }
+  .contenido { padding: 24px 16px 40px; }
+  .r-2, .r-11, .hallazgos { grid-template-columns: 1fr; }
+  .hallazgo { border-left: 0; border-top: 1px solid var(--borde); } .hallazgo:first-child { border-top: 0; }
+  .campos { grid-template-columns: 1fr; } .cabecera { flex-direction: column; }
+  th, td { padding-left: 12px; padding-right: 12px; }
+}
+@media (max-width: 560px) { .kpis { grid-template-columns: repeat(2, 1fr); } .kpi { border-left: 0 !important; border-top: 1px solid var(--borde); }
+  .kpi:nth-child(-n+2) { border-top: 0; } .kpi:nth-child(even) { border-left: 1px solid var(--borde) !important; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="marca">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true">
+        <rect width="30" height="30" rx="7" fill="#236B60"/>
+        <path d="M7 12.5c2.2-2.2 4.4-2.2 6.6 0s4.4 2.2 6.6 0 2.6-1.9 2.8-1.9" stroke="#A7DED0" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <path d="M7 18.5c2.2-2.2 4.4-2.2 6.6 0s4.4 2.2 6.6 0 2.6-1.9 2.8-1.9" stroke="#FFFFFF" stroke-width="2" fill="none" stroke-linecap="round"/>
+      </svg>
+      <div><div class="marca-nombre">Marea</div><div class="marca-sub">Inteligencia conversacional</div></div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="config">
+      <div class="nav"><a href="#/ajustes" data-ruta="ajustes"><svg class="i"><use href="#i-ajustes"/></svg>Ajustes</a></div>
+      <div class="local"><svg class="i"><use href="#i-candado"/></svg><span>Procesamiento local en esta computadora. Los chats no salen de 127.0.0.1.</span></div>
+    </div>
+  </aside>
+  <main class="main"><div class="contenido" id="vista"></div></main>
+</div>
+<div id="tip" role="tooltip"></div>
+
+<!-- Iconos lineales -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-subir" viewBox="0 0 24 24"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 15v3.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V15"/></symbol>
+  <symbol id="i-lista" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></symbol>
+  <symbol id="i-resumen" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="4" rx="1.5"/><rect x="13" y="10" width="7" height="10" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-personas" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.5"/><path d="M3 19.5c.8-3.2 3.2-5 6-5s5.2 1.8 6 5M16 5.2a3.5 3.5 0 0 1 0 6.6M18 14.8c1.5.8 2.6 2.4 3 4.7"/></symbol>
+  <symbol id="i-mensajes" viewBox="0 0 24 24"><path d="M5 5h14a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 19 17h-8l-4.5 3.5V17H5a1.5 1.5 0 0 1-1.5-1.5v-9A1.5 1.5 0 0 1 5 5Z"/></symbol>
+  <symbol id="i-barras" viewBox="0 0 24 24"><path d="M4 20h16M7 16v-5M12 16V6M17 16v-8"/></symbol>
+  <symbol id="i-pulso" viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 5 12 2.5-6H21"/></symbol>
+  <symbol id="i-escudo" viewBox="0 0 24 24"><path d="M12 3.5 5 6v5.5c0 4.3 3 7.6 7 9 4-1.4 7-4.7 7-9V6l-7-2.5Z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-ajustes" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+  <symbol id="i-candado" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="1.5"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></symbol>
+  <symbol id="i-buscar" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></symbol>
+  <symbol id="i-archivo" viewBox="0 0 24 24"><path d="M14 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8L14 3.5Z"/><path d="M14 3.5V8h4.5"/></symbol>
+  <symbol id="i-carpeta" viewBox="0 0 24 24"><path d="M3.5 7A1.5 1.5 0 0 1 5 5.5h4l2 2h8A1.5 1.5 0 0 1 20.5 9v8.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5V7Z"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M6 11.5a6 6 0 0 0 12 0M12 17.5v3"/></symbol>
+  <symbol id="i-alerta" viewBox="0 0 24 24"><path d="M12 4 3 19.5h18L12 4Z"/><path d="M12 10v4M12 17h.01"/></symbol>
+  <symbol id="i-papelera" viewBox="0 0 24 24"><path d="M4.5 7h15M10 7V4.5h4V7M6.5 7l1 12.5h9l1-12.5"/></symbol>
+  <symbol id="i-flecha" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-capas" viewBox="0 0 24 24"><path d="M12 4 3.5 8.5 12 13l8.5-4.5L12 4Z"/><path d="m3.5 12.5 8.5 4.5 8.5-4.5M3.5 16.5 12 21l8.5-4.5"/></symbol>
+  <symbol id="i-mas" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-bandeja" viewBox="0 0 24 24"><path d="M4 13.5 6.5 5h11l2.5 8.5V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-5.5Z"/><path d="M4 13.5h4.5l1 2.5h5l1-2.5H20"/></symbol>
+  <symbol id="i-lapiz" viewBox="0 0 24 24"><path d="M15.5 5.5 18.5 8.5 9 18l-4 1 1-4 9.5-9.5Z"/></symbol>
+  <symbol id="i-texto" viewBox="0 0 24 24"><path d="M5 6.5h14M5 11h14M5 15.5h9"/></symbol>
+</svg>
+
+<script>
+"use strict";
+/* ================================================================ utilidades */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const icono = n => `<svg class="i"><use href="#i-${n}"/></svg>`;
+const fmtN = n => (n ?? 0).toLocaleString("es-CR");
+const fmtBytes = n => n == null ? "" : n < 1024 ? n + " B" : n < 2**20 ? (n/1024).toFixed(1) + " KB" : n < 2**30 ? (n/2**20).toFixed(1) + " MB" : (n/2**30).toFixed(2) + " GB";
+const aFecha = iso => new Date(iso.length === 10 ? iso + "T00:00:00" : iso);
+const fmtDia = (iso, anio = true) => aFecha(iso).toLocaleDateString("es-CR", {day: "numeric", month: "short", ...(anio ? {year: "numeric"} : {})});
+const fmtDiaLargo = iso => aFecha(iso).toLocaleDateString("es-CR", {weekday: "long", day: "numeric", month: "long", year: "numeric"});
+const fmtHora = iso => aFecha(iso).toLocaleTimeString("es-CR", {hour: "numeric", minute: "2-digit"});
+const fmtFechaHora = iso => `${fmtDia(iso)}, ${fmtHora(iso)}`;
+const iniciales = n => esTelefono(n) ? "#" : (n || "?").replace(/^\+/, "").split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]).join("").toUpperCase();
+const esTelefono = n => /^\+?[\d\s\-()]{7,}$/.test(n || "");
+const fmtMin = m => m == null ? "—" : m < 1 ? "< 1 min" : m < 60 ? `${m.toLocaleString("es-CR")} min` : `${(m/60).toLocaleString("es-CR", {maximumFractionDigits: 1})} h`;
+const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+const TIPOS = {texto: "Texto", imagen: "Imagen", voz: "Nota de voz", audio: "Audio", video: "Video",
+  documento: "Documento", omitido: "Multimedia omitida", eliminado: "Eliminado", sistema: "Sistema"};
+const FUENTES = {manual: "Exportación manual", telefono: "Teléfono (USB)", generador: "Generador sintético"};
+const PAGINA = 300;
+
+const prefs = (() => { try { return JSON.parse(localStorage.getItem("marea.prefs")) || {}; } catch { return {}; } })();
+function guardarPrefs() { try { localStorage.setItem("marea.prefs", JSON.stringify(prefs)); } catch {} }
+
+async function api(url, opciones) {
+  const r = await fetch(url, opciones);
+  const j = await r.json().catch(() => ({error: `HTTP ${r.status}`}));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
+
+/* ================================================================ estado */
+const st = {
+  casos: [], carpeta: "", caso: null, datos: null,
+  seleccion: [], proceso: null,               // proceso de importación en curso / último
+  filtroTipo: null, filtroAutor: "", busqueda: "", mostrando: PAGINA,
+  carpetas: [], sinCarpeta: 0, nuevaCarpeta: false, marcados: new Set(),
+  fConv: {q: "", desde: "", hasta: ""},              // filtros de la lista de conversaciones
+  fGen: {carpeta: "", desde: "", hasta: ""},         // filtros del panorama general
+  general: null, genClave: "",
+};
+
+/* ================================================================ tooltip */
+const tip = $("#tip");
+document.addEventListener("mousemove", e => {
+  const t = e.target.closest?.("[data-tip]");
+  if (!t) { tip.style.display = "none"; return; }
+  tip.innerHTML = `<b>${esc(t.dataset.tipTitulo || "")}</b><span>${esc(t.dataset.tip)}</span>`;
+  tip.style.display = "block";
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = e.clientX + 14, y = e.clientY - h - 10;
+  if (x + w > innerWidth - 8) x = e.clientX - w - 14;
+  if (y < 8) y = e.clientY + 16;
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+});
+document.addEventListener("scroll", () => tip.style.display = "none", true);
+
+/* ================================================================ gráficos */
+function maxRedondo(v) {
+  if (v <= 0) return 1;
+  if (v <= 4) return Math.ceil(v);
+  const p = 10 ** Math.floor(Math.log10(v));
+  for (const m of [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) if (m * p >= v) return m * p;
+  return 10 * p;
+}
+const fmtEje = v => v >= 10000 ? (v / 1000).toLocaleString("es-CR", {maximumFractionDigits: 1}) + " K" : fmtN(v);
+
+/** Columnas verticales. items: [{etq, valor, titulo, detalle}] */
+function columnas(items, {alto = 200, minSep = 52} = {}) {
+  return `<div class="grafico" data-columnas='${esc(JSON.stringify({items, alto, minSep}))}'></div>`;
+}
+function dibujarColumnas(el) {
+  const {items, alto, minSep} = JSON.parse(el.dataset.columnas);
+  const W = Math.max(280, el.clientWidth), m = {t: 10, r: 4, b: 26, l: 40};
+  const ancho = W - m.l - m.r, altoP = alto - m.t - m.b;
+  const max = maxRedondo(Math.max(0, ...items.map(i => i.valor)));
+  const ticks = max <= 4 ? Array.from({length: max + 1}, (_, i) => i) : [0, max / 4, max / 2, 3 * max / 4, max].filter(v => Number.isInteger(v));
+  const banda = ancho / Math.max(1, items.length);
+  const bw = Math.max(1.5, Math.min(24, banda - 2, banda * 0.72));
+  const cada = Math.max(1, Math.ceil(minSep / banda));
+  const y = v => m.t + altoP - (v / max) * altoP;
+  let s = `<svg height="${alto}" viewBox="0 0 ${W} ${alto}" role="img">`;
+  for (const t of ticks)
+    s += `<line class="rejilla-l" x1="${m.l}" x2="${W - m.r}" y1="${y(t)}" y2="${y(t)}"/><text class="eje-t" x="${m.l - 8}" y="${y(t) + 4}" text-anchor="end">${fmtEje(t)}</text>`;
+  items.forEach((it, i) => {
+    const cx = m.l + banda * i + banda / 2, x = cx - bw / 2, h = (it.valor / max) * altoP, base = m.t + altoP;
+    const r = Math.min(4, bw / 2, h);
+    const forma = h <= 0 ? "" : `<path class="col" d="M${x},${base} V${base - h + r} Q${x},${base - h} ${x + r},${base - h} H${x + bw - r} Q${x + bw},${base - h} ${x + bw},${base - h + r} V${base} Z"/>`;
+    s += `<g class="c" data-tip-titulo="${esc(it.titulo)}" data-tip="${esc(it.detalle)}"><rect class="golpe" x="${m.l + banda * i}" y="${m.t}" width="${banda}" height="${altoP}"/>${forma}</g>`;
+    if (i % cada === 0) s += `<text class="eje-t" x="${cx}" y="${alto - 8}" text-anchor="middle">${esc(it.etq)}</text>`;
+  });
+  el.innerHTML = s + "</svg>";
+}
+function dibujarGraficos() { document.querySelectorAll("[data-columnas]").forEach(dibujarColumnas); }
+let tRedim; addEventListener("resize", () => { clearTimeout(tRedim); tRedim = setTimeout(dibujarGraficos, 120); });
+
+function colorSecuencial(v, max) {
+  if (!v) return "var(--s0)";
+  const r = v / max;
+  return r <= .2 ? "var(--s1)" : r <= .4 ? "var(--s2)" : r <= .6 ? "var(--s3)" : r <= .8 ? "var(--s4)" : "var(--s5)";
+}
+function tablaDatos(cols, filas) {
+  return `<details class="datos"><summary>Ver datos en tabla</summary><table><thead><tr>${cols.map((c, i) => `<th class="${i ? "der" : ""}">${c}</th>`).join("")}</tr></thead>
+    <tbody>${filas.map(f => `<tr>${f.map((c, i) => `<td class="${i ? "der num" : ""}">${c}</td>`).join("")}</tr>`).join("")}</tbody></table></details>`;
+}
+
+/* ================================================================ navegación */
+function ruta() {
+  const p = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
+  return {seccion: p[0] || "", caso: p[1], vista: p[2] || "resumen"};
+}
+const ir = h => { location.hash = h; };
+addEventListener("hashchange", renderizar);
+const nombreCarpeta = id => !id ? "Sin carpeta" : (st.carpetas.find(c => c.id === id)?.nombre ?? "Carpeta eliminada");
+const opcionesCarpeta = sel => `<option value="" ${!sel ? "selected" : ""}>Sin carpeta</option>` +
+  st.carpetas.map(c => `<option value="${esc(c.id)}" ${sel === c.id ? "selected" : ""}>${esc(c.nombre)}</option>`).join("");
+const normalizar = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const kpi = (etq, valor, nota) => `<div class="kpi"><div class="kpi-etq">${etq}</div><div class="kpi-valor">${valor}</div><div class="kpi-nota">${nota || "&nbsp;"}</div></div>`;
+const JSON_POST = cuerpo => ({method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(cuerpo)});
+
+function renderNav() {
+  const r = ruta(), c = st.datos && st.caso;
+  const enlace = (href, ic, txt, activo, extra = "") =>
+    `<a href="${href}" class="${activo ? "activo" : ""}">${icono(ic)}<span class="nav-txt">${txt}</span>${extra}</a>`;
+  const cuenta = n => `<span class="cuenta">${fmtN(n)}</span>`;
+  const enConv = id => r.seccion === "conversaciones" && (r.caso || "") === id;
+  let h = `<div class="nav-grupo">Espacio de trabajo</div>
+    ${enlace("#/general", "capas", "Panorama general", r.seccion === "general")}
+    ${enlace("#/conversaciones", "lista", "Conversaciones", enConv(""), cuenta(st.casos.length))}
+    ${enlace("#/importar", "subir", "Importar", r.seccion === "importar")}
+    <div class="nav-grupo nav-grupo-fila"><span>Carpetas</span>
+      <button class="nav-mas" id="btnNuevaCarpeta" type="button" title="Nueva carpeta" aria-label="Nueva carpeta">${icono("mas")}</button></div>
+    ${st.nuevaCarpeta ? `<div class="nueva-carpeta"><input type="text" id="inNuevaCarpeta" maxlength="60" placeholder="Nombre y Enter" aria-label="Nombre de la carpeta nueva"></div>` : ""}
+    ${st.carpetas.map(k => enlace(`#/conversaciones/${encodeURIComponent(k.id)}`, "carpeta", esc(k.nombre), enConv(k.id), cuenta(k.conversaciones))).join("")}
+    ${enlace("#/conversaciones/_sin", "bandeja", "Sin carpeta", enConv("_sin"), cuenta(st.sinCarpeta))}`;
+  if (c) {
+    const base = `#/caso/${encodeURIComponent(st.caso)}`, en = v => r.seccion === "caso" && r.vista === v;
+    h += `<div class="nav-grupo">Conversación</div><div class="nav-caso" title="${esc(st.datos.metadata.chat)}">${esc(st.datos.metadata.chat)}</div>
+      ${enlace(base + "/resumen", "resumen", "Resumen", en("resumen"))}
+      ${enlace(base + "/participantes", "personas", "Participantes", en("participantes"), cuenta(st.datos.estadisticas.resumen.participantes))}
+      ${enlace(base + "/mensajes", "mensajes", "Mensajes", en("mensajes"), cuenta(st.datos.metadata.total_mensajes))}
+      ${enlace(base + "/estadisticas", "barras", "Estadísticas", en("estadisticas"))}
+      ${enlace(base + "/patrones", "pulso", "Patrones", en("patrones"))}
+      ${enlace(base + "/evidencias", "escudo", "Evidencias", en("evidencias"))}`;
+  }
+  $("#nav").innerHTML = h;
+  document.querySelectorAll('.config a').forEach(a => a.classList.toggle("activo", r.seccion === "ajustes"));
+  $("#btnNuevaCarpeta").onclick = () => { st.nuevaCarpeta = !st.nuevaCarpeta; renderNav(); $("#inNuevaCarpeta")?.focus(); };
+  const inp = $("#inNuevaCarpeta");
+  if (inp) {
+    inp.onkeydown = async e => {
+      if (e.key === "Escape") { st.nuevaCarpeta = false; renderNav(); }
+      if (e.key !== "Enter" || !inp.value.trim()) return;
+      try {
+        const k = await api("/api/carpetas", JSON_POST({nombre: inp.value}));
+        st.nuevaCarpeta = false; await cargarCasos();
+        ir(`#/conversaciones/${encodeURIComponent(k.id)}`); renderNav();
+      } catch (err) { inp.setCustomValidity(err.message); inp.reportValidity(); inp.oninput = () => inp.setCustomValidity(""); }
+    };
+    inp.onblur = () => { if (st.nuevaCarpeta && !inp.value.trim()) { st.nuevaCarpeta = false; renderNav(); } };
+  }
+}
+
+async function renderizar() {
+  const r = ruta(), v = $("#vista");
+  tip.style.display = "none";
+  if (!r.seccion) { ir(st.casos.length ? "#/general" : "#/importar"); return; }
+  if (r.seccion === "caso" && r.caso) {
+    if (st.caso !== r.caso || !st.datos) {
+      v.innerHTML = `<div class="vacio">Cargando conversación…</div>`;
+      try {
+        st.datos = await api(`/api/casos/${encodeURIComponent(r.caso)}`);
+        st.caso = r.caso; st.filtroTipo = null; st.filtroAutor = ""; st.busqueda = ""; st.mostrando = PAGINA;
+      } catch (e) {
+        st.caso = null; st.datos = null; renderNav();
+        v.innerHTML = `<div class="error">${icono("alerta")}<span>${esc(e.message)}</span></div>`; return;
+      }
+    }
+    renderNav();
+    const vistas = {resumen: vResumen, participantes: vParticipantes, mensajes: vMensajes,
+                    estadisticas: vEstadisticas, patrones: () => vPatrones(), evidencias: vEvidencias};
+    v.innerHTML = cabeceraCaso(r.vista) + (vistas[r.vista] || vResumen)();
+    enlazarCaso(r.vista);
+  } else {
+    renderNav();
+    if (r.seccion === "conversaciones") { v.innerHTML = vConversaciones(r.caso); enlazarConversaciones(r.caso); }
+    else if (r.seccion === "general") { v.innerHTML = vGeneral(); enlazarGeneral(); }
+    else if (r.seccion === "ajustes") { v.innerHTML = vAjustes(); enlazarAjustes(); }
+    else { v.innerHTML = vImportar(); enlazarImportar(); }
+  }
+  dibujarGraficos();
+  scrollTo(0, 0);
+}
+
+async function cargarCasos() {
+  const r = await api("/api/casos");
+  st.casos = r.casos; st.carpeta = r.carpeta; st.carpetas = r.carpetas; st.sinCarpeta = r.sin_carpeta;
+  st.general = null;            // los datos cambiaron: el panorama general se recalcula
+}
+
+/* ================================================================ Importar */
+function vImportar() {
+  const p = st.proceso;
+  const paso = (n, clave, titulo, detalle) => {
+    const e = p?.pasos?.[clave] || "";
+    return `<li class="paso ${e}"><span class="paso-marca">${e === "hecho" ? "✓" : e === "error" ? "!" : n}</span>
+      <div><div class="paso-titulo">${titulo}</div><div class="paso-detalle">${detalle}</div></div></li>`;
+  };
+  const det = p?.detalles || {};
+  return `
+  <div class="cabecera"><div>
+    <h1>Importar conversación</h1>
+    <p class="subtitulo">Cargue la exportación de WhatsApp tal como sale del teléfono. Se analiza el formato, se registra el SHA-256 de cada archivo y la conversación queda lista para enviarse a la plataforma.</p>
+  </div></div>
+  <div class="rejilla r-2">
+    <div class="pila">
+      <section class="panel"><div class="panel-cuerpo">
+        <div class="zona" id="zona" tabindex="0" role="button" aria-label="Seleccionar archivos">
+          <div class="zona-icono">${icono("subir")}</div>
+          <strong>Arrastre la exportación aquí</strong>
+          <span>Archivo .zip, archivo .txt, o la carpeta con el .txt y sus fotos y audios</span>
+          <div class="zona-acciones">
+            <button class="btn btn-chico" id="btnArchivos" type="button">${icono("archivo")}Elegir archivos</button>
+            <button class="btn btn-chico" id="btnCarpeta" type="button">${icono("carpeta")}Elegir carpeta</button>
+          </div>
+        </div>
+        <input type="file" id="inArchivos" multiple hidden>
+        <input type="file" id="inCarpeta" webkitdirectory hidden>
+        <div id="seleccion"></div>
+        <div class="campos">
+          <div><label class="campo" for="nombre">Nombre del caso</label><input type="text" id="nombre" placeholder="Se toma del chat"></div>
+          <div><label class="campo" for="fuente">Fuente</label>
+            <select id="fuente">${Object.entries(FUENTES).map(([k, t]) => `<option value="${k}" ${(prefs.fuente || "manual") === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+          <div><label class="campo" for="prioridad">Prioridad</label><input type="number" id="prioridad" min="1" max="10" value="${prefs.prioridad || 5}"></div>
+        </div>
+        <div style="margin-top:14px;max-width:320px"><label class="campo" for="carpetaImp">Carpeta</label>
+          <select id="carpetaImp">${opcionesCarpeta(st.carpetaImp || "")}</select></div>
+        <label class="check-simple"><input type="checkbox" id="sobrescribir"> Reemplazar si ya existe un caso con el mismo nombre</label>
+        <label class="check"><input type="checkbox" id="declaro">
+          <span>Declaro que todos los participantes son integrantes del equipo, que dieron su consentimiento y que el contenido es ficticio <span style="color:var(--texto-2)">(enunciado, B.3)</span>.</span></label>
+        <div style="display:flex;gap:10px;margin-top:18px;align-items:center">
+          <button class="btn btn-primario" id="btnImportar" disabled>Procesar conversación</button>
+          <span id="ayudaBoton" style="font-size:12.5px;color:var(--texto-2)"></span>
+        </div>
+        <div id="errorImp" style="margin-top:14px"></div>
+      </div></section>
+
+      <section class="panel"><details>
+        <summary class="panel-cab" style="padding-bottom:16px;cursor:pointer;list-style:none"><div>
+          <h2>Pegar texto de un chat</h2><p class="panel-desc">Útil para probar variantes del formato sin exportar de nuevo.</p></div>
+          ${icono("flecha")}</summary>
+        <div class="panel-cuerpo" style="padding-top:0">
+          <textarea id="pegado" placeholder="10/11/2026, 9:51 a. m. - Sharon: hola"></textarea>
+          <button class="btn btn-chico" id="btnPegar" style="margin-top:10px">Procesar texto</button>
+        </div>
+      </details></section>
+    </div>
+
+    <div class="pila">
+      <section class="panel">
+        <div class="panel-cab"><div><h2>Estado del procesamiento</h2>
+          <p class="panel-desc">${p ? (p.fin ? (p.error ? "La última importación no se completó." : "Última importación completada.") : "En curso…") : "Sin importaciones en esta sesión."}</p></div></div>
+        <div class="panel-cuerpo"><ol class="pasos">
+          ${paso(1, "seleccion", "Selección", det.seleccion || "Archivos de la exportación")}
+          ${paso(2, "subida", "Subida", det.subida || "Copia local en el servidor 127.0.0.1")}
+          ${paso(3, "proceso", "Análisis y registro", det.proceso || "Parseo del formato, enlace de adjuntos y SHA-256")}
+          ${paso(4, "listo", "Conversación lista", det.listo || "Disponible para explorar y enviar a la plataforma")}
+        </ol>
+        ${p?.fin && !p.error ? `<a class="btn btn-chico" href="#/caso/${encodeURIComponent(p.caso)}/resumen">Abrir conversación ${icono("flecha")}</a>` : ""}
+        </div>
+      </section>
+      <section class="panel"><div class="panel-cab"><h2>Formatos admitidos</h2></div>
+        <div class="panel-cuerpo"><dl class="lista-def" style="grid-template-columns:110px 1fr">
+          <dt>Android</dt><dd><span class="mono">10/11/2026, 9:51 a. m. - Autor: texto</span></dd>
+          <dt>iOS</dt><dd><span class="mono">[10/11/26, 9:51:32 a. m.] Autor: texto</span></dd>
+          <dt>Adjuntos</dt><dd><span class="mono">IMG-…jpg (archivo adjunto)</span>, <span class="mono">&lt;adjunto: …&gt;</span></dd>
+          <dt>Empaque</dt><dd>.zip con archivos, .txt sin archivos, o carpeta descomprimida</dd>
+        </dl></div></section>
+    </div>
+  </div>`;
+}
+
+function enlazarImportar() {
+  mostrarSeleccion();
+  const zona = $("#zona");
+  ["dragenter", "dragover"].forEach(e => zona.addEventListener(e, ev => { ev.preventDefault(); zona.classList.add("sobre"); }));
+  ["dragleave", "drop"].forEach(e => zona.addEventListener(e, ev => { ev.preventDefault(); zona.classList.remove("sobre"); }));
+  zona.addEventListener("drop", async ev => {
+    const entradas = [...ev.dataTransfer.items].map(i => i.webkitGetAsEntry?.()).filter(Boolean);
+    if (entradas.length) { const a = []; for (const e of entradas) a.push(...await leerEntrada(e)); setSeleccion(a); }
+    else setSeleccion([...ev.dataTransfer.files]);
+  });
+  zona.addEventListener("click", e => { if (!e.target.closest("button")) $("#inArchivos").click(); });
+  zona.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("#inArchivos").click(); } });
+  $("#btnArchivos").onclick = () => $("#inArchivos").click();
+  $("#btnCarpeta").onclick = () => $("#inCarpeta").click();
+  $("#inArchivos").onchange = e => setSeleccion([...e.target.files]);
+  $("#inCarpeta").onchange = e => setSeleccion([...e.target.files]);
+  $("#declaro").onchange = actualizarBoton; $("#fuente").onchange = actualizarBoton;
+  $("#btnImportar").onclick = importarSeleccion;
+  $("#btnPegar").onclick = importarPegado;
+  actualizarBoton();
+}
+async function leerEntrada(entry) {
+  if (entry.isFile) return [await new Promise((ok, mal) => entry.file(ok, mal))];
+  const lector = entry.createReader(), salida = [];
+  let lote;
+  do { lote = await new Promise((ok, mal) => lector.readEntries(ok, mal)); for (const e of lote) salida.push(...await leerEntrada(e)); } while (lote.length);
+  return salida;
+}
+function setSeleccion(archivos) { st.seleccion = archivos.filter(f => !f.name.startsWith(".")); mostrarSeleccion(); actualizarBoton(); }
+function mostrarSeleccion() {
+  const s = st.seleccion, el = $("#seleccion");
+  if (!el) return;
+  if (!s.length) { el.innerHTML = ""; return; }
+  const total = s.reduce((a, f) => a + f.size, 0);
+  el.innerHTML = `<div class="seleccion">${s.slice(0, 40).map(f => `<div><span>${esc(f.name)}</span><span class="num" style="color:var(--texto-2)">${fmtBytes(f.size)}</span></div>`).join("")}
+    ${s.length > 40 ? `<div><span>… y ${s.length - 40} archivos más</span></div>` : ""}
+    <div class="total"><span>${s.length} ${s.length === 1 ? "archivo" : "archivos"}</span><span class="num">${fmtBytes(total)}</span></div></div>
+    <div style="margin-top:6px;text-align:right"><button class="btn btn-texto btn-chico" id="btnQuitar">Quitar selección</button></div>`;
+  $("#btnQuitar").onclick = () => setSeleccion([]);
+}
+function actualizarBoton() {
+  const b = $("#btnImportar"); if (!b) return;
+  const requiere = $("#fuente").value !== "generador";
+  const falta = !st.seleccion.length ? "Seleccione la exportación." : requiere && !$("#declaro").checked ? "Falta la declaración de consentimiento." : "";
+  b.disabled = !!falta || (st.proceso && !st.proceso.fin);
+  $("#ayudaBoton").textContent = falta;
+}
+function opciones() {
+  prefs.fuente = $("#fuente").value; prefs.prioridad = +$("#prioridad").value || 5; guardarPrefs();
+  st.carpetaImp = $("#carpetaImp").value;
+  return {carpeta: $("#carpetaImp").value || null,
+          declaro: $("#declaro").checked, fuente: $("#fuente").value, nombre: $("#nombre").value,
+          prioridad: +$("#prioridad").value || 5, sobrescribir: $("#sobrescribir").checked};
+}
+function refrescarProceso() {
+  if (ruta().seccion !== "importar") return;
+  const form = {}; ["nombre", "fuente", "prioridad", "carpetaImp"].forEach(k => form[k] = $("#" + k)?.value);
+  const flags = {declaro: $("#declaro")?.checked, sobrescribir: $("#sobrescribir")?.checked, pegado: $("#pegado")?.value};
+  $("#vista").innerHTML = vImportar(); enlazarImportar();
+  Object.entries(form).forEach(([k, v]) => { if (v != null) $("#" + k).value = v; });
+  $("#declaro").checked = !!flags.declaro; $("#sobrescribir").checked = !!flags.sobrescribir;
+  if (flags.pegado) { $("#pegado").value = flags.pegado; $("#pegado").closest("details").open = true; }
+  actualizarBoton();
+  if (st.proceso?.error) $("#errorImp").innerHTML = `<div class="error">${icono("alerta")}<span>${esc(st.proceso.error)}</span></div>`;
+}
+async function ejecutarImportacion(subir, opts, descripcion) {
+  st.proceso = {pasos: {seleccion: "hecho", subida: "activo"}, detalles: {seleccion: descripcion}, fin: false};
+  refrescarProceso();
+  try {
+    await subir();
+    st.proceso.pasos.subida = "hecho"; st.proceso.pasos.proceso = "activo"; refrescarProceso();
+    const r = await opts();
+    const res = r.resumen;
+    st.proceso.pasos.proceso = "hecho"; st.proceso.pasos.listo = "hecho";
+    st.proceso.detalles.proceso = `${fmtN(res.mensajes)} mensajes de ${res.participantes} ${res.participantes === 1 ? "participante" : "participantes"}${res.avisos ? ` · ${res.avisos} ${res.avisos === 1 ? "aviso" : "avisos"}` : ""}`;
+    st.proceso.detalles.listo = `Caso ${r.caso}`;
+    st.proceso.caso = r.caso; st.proceso.fin = true;
+    st.seleccion = []; st.caso = null; st.datos = null;
+    await cargarCasos(); renderNav(); refrescarProceso();
+  } catch (e) {
+    const k = Object.keys(st.proceso.pasos).find(k => st.proceso.pasos[k] === "activo");
+    if (k) st.proceso.pasos[k] = "error";
+    st.proceso.error = e.message; st.proceso.fin = true; refrescarProceso();
+  }
+}
+function importarSeleccion() {
+  const archivos = st.seleccion, lote = crypto.randomUUID().replace(/-/g, ""), o = opciones();
+  const total = archivos.reduce((a, f) => a + f.size, 0);
+  ejecutarImportacion(async () => {
+    let hecho = 0;
+    for (const [i, f] of archivos.entries()) {
+      st.proceso.detalles.subida = `${i + 1} de ${archivos.length}: ${f.name}`; refrescarProceso();
+      await api(`/api/subir?lote=${lote}&archivo=${encodeURIComponent(f.name)}`, {method: "POST", body: f});
+      hecho += f.size;
+    }
+    st.proceso.detalles.subida = `${archivos.length} ${archivos.length === 1 ? "archivo" : "archivos"} · ${fmtBytes(hecho)}`;
+  }, () => api("/api/importar", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({lote, ...o})}),
+  `${archivos.length} ${archivos.length === 1 ? "archivo" : "archivos"} · ${fmtBytes(total)}`);
+}
+function importarPegado() {
+  const texto = $("#pegado").value, o = opciones();
+  if (o.fuente !== "generador" && !o.declaro) {
+    $("#errorImp").innerHTML = `<div class="error">${icono("alerta")}<span>Marque la declaración de consentimiento antes de procesar.</span></div>`; return;
+  }
+  ejecutarImportacion(async () => { st.proceso.detalles.subida = "Texto enviado con la solicitud"; },
+    () => api("/api/pegar", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({texto, ...o})}),
+    `Texto pegado · ${fmtN(texto.split("\n").length)} líneas`);
+}
+
+/* ================================================================ Conversaciones */
+function vConversaciones(carpeta) {
+  if (!st.casos.length) return `
+    <div class="cabecera"><div><h1>Conversaciones</h1><p class="subtitulo">Casos importados en <span class="mono">${esc(st.carpeta)}</span></p></div></div>
+    <section class="panel"><div class="vacio"><h2>Todavía no hay conversaciones</h2><p>Importe una exportación de WhatsApp para comenzar.</p>
+      <a class="btn btn-primario" href="#/importar">${icono("subir")}Importar conversación</a></div></section>`;
+  const k = st.carpetas.find(c => c.id === carpeta);
+  if (carpeta && carpeta !== "_sin" && !k)
+    return `<div class="error">${icono("alerta")}<span>La carpeta no existe; puede que se haya eliminado.</span></div>`;
+  const titulo = !carpeta ? "Conversaciones" : carpeta === "_sin" ? "Sin carpeta" : k.nombre;
+  const total = !carpeta ? st.casos.length : carpeta === "_sin" ? st.sinCarpeta : k.conversaciones;
+  return `
+  ${carpeta ? `<div class="migas"><a href="#/conversaciones">Conversaciones</a>${icono("flecha")}<span>${esc(titulo)}</span></div>` : ""}
+  <div class="cabecera"><div>
+      <h1 id="tituloConv">${esc(titulo)}</h1>
+      <p class="subtitulo">${carpeta ? `${fmtN(total)} ${total === 1 ? "conversación" : "conversaciones"} en ${carpeta === "_sin" ? "ninguna carpeta" : "esta carpeta"}`
+        : `Casos importados en <span class="mono">${esc(st.carpeta)}</span>`}</p></div>
+    <div class="acciones-cab">
+      ${k ? `<button class="btn btn-texto btn-chico" id="btnRenombrar">${icono("lapiz")}Renombrar</button>
+        <button class="btn btn-texto btn-chico btn-peligro" id="btnBorrarCarpeta">${icono("papelera")}Eliminar carpeta</button>` : ""}
+      <a class="btn btn-primario" href="#/importar">${icono("subir")}Importar</a></div></div>
+  <section class="panel">
+    <div class="filtros">
+      <div class="f f-buscar"><label for="fQ">Buscar</label>
+        <div class="buscador">${icono("buscar")}<input type="search" id="fQ" placeholder="Nombre del chat, caso o participante" value="${esc(st.fConv.q)}"></div></div>
+      <div class="f"><label for="fDesde">Con mensajes desde</label><input type="date" id="fDesde" value="${st.fConv.desde}"></div>
+      <div class="f"><label for="fHasta">Hasta</label><input type="date" id="fHasta" value="${st.fConv.hasta}"></div>
+      <button class="btn btn-texto btn-chico" id="btnLimpiarF">Limpiar filtros</button>
+    </div>
+    <div id="lote"></div>
+    <div id="tablaConv" class="tabla-scroll"></div>
+  </section>`;
+}
+
+function filtrarConversaciones(carpeta) {
+  const q = normalizar(st.fConv.q.trim()), {desde, hasta} = st.fConv, rango = !!(desde || hasta);
+  const filas = [];
+  for (const c of st.casos) {
+    if (carpeta === "_sin" ? c.carpeta : (carpeta && c.carpeta !== carpeta)) continue;
+    let coincide = null;
+    if (q) {
+      const porNombre = [c.chat, c.caso].some(x => normalizar(x).includes(q));
+      coincide = porNombre ? null : (c.nombres || []).find(n => normalizar(n).includes(q));
+      if (!porNombre && !coincide) continue;
+    }
+    let enRango = null;
+    if (rango) {
+      enRango = Object.entries(c.por_dia || {}).reduce((a, [d, n]) => a + ((!desde || d >= desde) && (!hasta || d <= hasta) ? n : 0), 0);
+      if (!enRango) continue;
+    }
+    filas.push({...c, coincide, enRango});
+  }
+  return {filas, rango};
+}
+
+function renderTablaConv(carpeta) {
+  const el = $("#tablaConv"); if (!el) return;
+  const {desde, hasta} = st.fConv;
+  if (desde && hasta && desde > hasta) {
+    el.innerHTML = `<div style="padding:16px 20px"><div class="error">${icono("alerta")}<span>La fecha inicial es posterior a la final.</span></div></div>`;
+    renderLote(carpeta); return;
+  }
+  const {filas, rango} = filtrarConversaciones(carpeta);
+  const existentes = new Set(st.casos.map(c => c.caso));
+  for (const c of [...st.marcados]) if (!existentes.has(c)) st.marcados.delete(c);
+  const enCarpeta = st.casos.filter(c => carpeta === "_sin" ? !c.carpeta : !carpeta || c.carpeta === carpeta).length;
+  const todos = filas.length > 0 && filas.every(f => st.marcados.has(f.caso));
+  const aviso = n => n ? `<span class="etiqueta" style="background:var(--aviso-fondo);border-color:var(--aviso-borde);color:var(--aviso-texto)">${n}</span>` : `<span style="color:var(--texto-2)">—</span>`;
+  el.innerHTML = filas.length ? `<table>
+    <thead><tr><th class="sel"><input type="checkbox" id="selTodos" aria-label="Seleccionar todas" ${todos ? "checked" : ""}></th>
+      <th>Conversación</th><th>Carpeta</th><th>Período</th><th class="der">Mensajes</th>${rango ? `<th class="der">En el rango</th>` : ""}
+      <th class="der">Participantes</th><th>Importada</th><th>Avisos</th></tr></thead>
+    <tbody>${filas.map(x => `<tr class="clic" data-caso="${esc(x.caso)}">
+      <td class="sel"><input type="checkbox" class="selFila" value="${esc(x.caso)}" aria-label="Seleccionar ${esc(x.chat)}" ${st.marcados.has(x.caso) ? "checked" : ""}></td>
+      <td><div style="font-weight:600">${esc(x.chat || x.caso)}</div>
+        <div class="mono">${esc(x.caso)}${x.coincide ? `<span style="font-family:var(--fuente)"> · participante: ${esc(x.coincide)}</span>` : ""}</div></td>
+      <td><span class="etq-carpeta">${icono(x.carpeta ? "carpeta" : "bandeja")}${esc(nombreCarpeta(x.carpeta))}</span></td>
+      <td class="fecha">${x.inicio ? `${fmtDia(x.inicio, false)} – ${fmtDia(x.fin)}` : "—"}</td>
+      <td class="der num">${fmtN(x.mensajes)}</td>${rango ? `<td class="der num">${fmtN(x.enRango)}</td>` : ""}
+      <td class="der num">${x.participantes}</td>
+      <td class="fecha">${x.importado ? fmtFechaHora(x.importado) : "—"}</td>
+      <td>${aviso(x.avisos)}</td></tr>`).join("")}</tbody></table>
+    <div class="pie-tabla">${fmtN(filas.length)} de ${fmtN(enCarpeta)} ${enCarpeta === 1 ? "conversación" : "conversaciones"}${rango ? " con mensajes en el rango elegido" : ""}</div>`
+    : `<div class="vacio"><h2>Sin resultados</h2><p>${enCarpeta ? "Ninguna conversación coincide con los filtros." : "Esta carpeta está vacía. Seleccione conversaciones en la lista general y muévalas aquí."}</p></div>`;
+  const selTodos = $("#selTodos");
+  if (selTodos) selTodos.onchange = () => { filas.forEach(f => selTodos.checked ? st.marcados.add(f.caso) : st.marcados.delete(f.caso)); renderTablaConv(carpeta); };
+  el.querySelectorAll(".selFila").forEach(cb => cb.onchange = () => {
+    cb.checked ? st.marcados.add(cb.value) : st.marcados.delete(cb.value);
+    if (selTodos) selTodos.checked = filas.every(f => st.marcados.has(f.caso));
+    renderLote(carpeta);
+  });
+  renderLote(carpeta);
+}
+
+function renderLote(carpeta) {
+  const n = st.marcados.size, el = $("#lote");
+  if (!el) return;
+  if (!n) { el.innerHTML = ""; return; }
+  const destino = st.carpetas.find(c => c.id !== carpeta)?.id || "";
+  el.innerHTML = `<div class="acciones-lote"><b>${n} ${n === 1 ? "seleccionada" : "seleccionadas"}</b><span>Mover a</span>
+    <select id="destinoLote" aria-label="Carpeta de destino">${opcionesCarpeta(destino)}</select>
+    <button class="btn btn-primario btn-chico" id="btnMoverLote">Mover</button>
+    <button class="btn btn-texto btn-chico" id="btnCancelarLote">Cancelar</button>
+    ${!st.carpetas.length ? `<span style="color:var(--texto-2)">Cree una carpeta con el botón + de la barra lateral.</span>` : ""}</div>`;
+  $("#btnMoverLote").onclick = async () => {
+    try { await moverCasos([...st.marcados], $("#destinoLote").value); st.marcados.clear(); renderTablaConv(carpeta); refrescarCabeceraConv(carpeta); }
+    catch (e) { alert(e.message); }
+  };
+  $("#btnCancelarLote").onclick = () => { st.marcados.clear(); renderTablaConv(carpeta); };
+}
+
+async function moverCasos(casos, carpeta) {
+  await api("/api/mover", JSON_POST({casos, carpeta: carpeta || null}));
+  await cargarCasos(); renderNav();
+  if (st.datos && casos.includes(st.caso)) st.datos.carpeta = carpeta || null;
+}
+function refrescarCabeceraConv(carpeta) {
+  const sub = document.querySelector(".cabecera .subtitulo");
+  if (!sub || !carpeta) return;
+  const total = carpeta === "_sin" ? st.sinCarpeta : st.carpetas.find(c => c.id === carpeta)?.conversaciones ?? 0;
+  sub.textContent = `${fmtN(total)} ${total === 1 ? "conversación" : "conversaciones"} en ${carpeta === "_sin" ? "ninguna carpeta" : "esta carpeta"}`;
+}
+
+function enlazarConversaciones(carpeta) {
+  if (!$("#tablaConv")) return;
+  let t;
+  $("#fQ").oninput = e => { clearTimeout(t); t = setTimeout(() => { st.fConv.q = e.target.value; renderTablaConv(carpeta); }, 150); };
+  $("#fDesde").onchange = e => { st.fConv.desde = e.target.value; renderTablaConv(carpeta); };
+  $("#fHasta").onchange = e => { st.fConv.hasta = e.target.value; renderTablaConv(carpeta); };
+  $("#btnLimpiarF").onclick = () => {
+    st.fConv = {q: "", desde: "", hasta: ""}; ["#fQ", "#fDesde", "#fHasta"].forEach(s => $(s).value = ""); renderTablaConv(carpeta); };
+  const k = st.carpetas.find(c => c.id === carpeta);
+  if (k) {
+    $("#btnRenombrar").onclick = () => {
+      $("#tituloConv").innerHTML = `<input type="text" id="inRenombrar" class="input-titulo" maxlength="60" value="${esc(k.nombre)}" aria-label="Nuevo nombre">
+        <div class="panel-desc" style="font-family:var(--fuente);font-size:12.5px;margin-top:4px">Enter para guardar · Esc para cancelar</div>`;
+      const i = $("#inRenombrar"); i.focus(); i.select();
+      i.onkeydown = async e => {
+        if (e.key === "Escape") return renderizar();
+        if (e.key !== "Enter") return;
+        try { await api(`/api/carpetas/${encodeURIComponent(k.id)}/renombrar`, JSON_POST({nombre: i.value})); await cargarCasos(); renderizar(); }
+        catch (err) { i.setCustomValidity(err.message); i.reportValidity(); i.oninput = () => i.setCustomValidity(""); }
+      };
+    };
+    $("#btnBorrarCarpeta").onclick = async () => {
+      if (!confirm(`¿Eliminar la carpeta "${k.nombre}"?\n\nSus ${k.conversaciones} ${k.conversaciones === 1 ? "conversación pasará" : "conversaciones pasarán"} a "Sin carpeta". No se borra ninguna conversación.`)) return;
+      try { await api(`/api/carpetas/${encodeURIComponent(k.id)}`, {method: "DELETE"}); await cargarCasos(); ir("#/conversaciones"); }
+      catch (e) { alert(e.message); }
+    };
+  }
+  renderTablaConv(carpeta);
+}
+
+document.addEventListener("click", e => {
+  if (e.target.closest("input, select, button, a, label, td.sel")) return;
+  const fila = e.target.closest("tr.clic[data-caso]");
+  if (fila) ir(`#/caso/${encodeURIComponent(fila.dataset.caso)}/resumen`);
+});
+
+/* ================================================================ Panorama general */
+function vGeneral() {
+  const cab = `<div class="cabecera"><div><h1>Panorama general</h1>
+      <p class="subtitulo">Estadísticas combinadas de las conversaciones importadas. Filtre por carpeta o por rango de fechas.</p></div>
+      <a class="btn btn-primario" href="#/importar">${icono("subir")}Importar</a></div>`;
+  if (!st.casos.length) return cab + `<section class="panel"><div class="vacio"><h2>Todavía no hay conversaciones</h2>
+    <p>Importe una exportación de WhatsApp para ver estadísticas generales.</p>
+    <a class="btn btn-primario" href="#/importar">${icono("subir")}Importar conversación</a></div></section>`;
+  const f = st.fGen;
+  if (f.carpeta && f.carpeta !== "_sin" && !st.carpetas.some(c => c.id === f.carpeta)) f.carpeta = "";
+  return cab + `
+  <section class="panel"><div class="filtros" style="border-bottom:0">
+    <div class="f"><label for="gCarpeta">Carpeta</label><select id="gCarpeta">
+      <option value="">Todas las carpetas</option><option value="_sin" ${f.carpeta === "_sin" ? "selected" : ""}>Sin carpeta</option>
+      ${st.carpetas.map(c => `<option value="${esc(c.id)}" ${f.carpeta === c.id ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}</select></div>
+    <div class="f"><label for="gDesde">Desde</label><input type="date" id="gDesde" value="${f.desde}"></div>
+    <div class="f"><label for="gHasta">Hasta</label><input type="date" id="gHasta" value="${f.hasta}"></div>
+    <button class="btn btn-texto btn-chico" id="gLimpiar">Limpiar filtros</button>
+  </div></section>
+  <div id="general" style="margin-top:20px"><div class="vacio">Calculando estadísticas…</div></div>`;
+}
+function enlazarGeneral() {
+  if (!$("#general")) return;
+  const cambiar = () => { st.fGen = {carpeta: $("#gCarpeta").value, desde: $("#gDesde").value, hasta: $("#gHasta").value}; cargarGeneral(); };
+  ["#gCarpeta", "#gDesde", "#gHasta"].forEach(s => $(s).onchange = cambiar);
+  $("#gLimpiar").onclick = () => { $("#gCarpeta").value = ""; $("#gDesde").value = ""; $("#gHasta").value = ""; cambiar(); };
+  cargarGeneral();
+}
+async function cargarGeneral() {
+  const f = st.fGen, clave = JSON.stringify(f), el = () => $("#general");
+  if (f.desde && f.hasta && f.desde > f.hasta) {
+    el().innerHTML = `<div class="error">${icono("alerta")}<span>La fecha inicial es posterior a la final.</span></div>`; return;
+  }
+  if (!(st.general && st.genClave === clave)) {
+    el().innerHTML = `<div class="vacio">Calculando estadísticas…</div>`;
+    try {
+      const q = new URLSearchParams(Object.entries(f).filter(([, v]) => v));
+      const datos = await api(`/api/general?${q}`);
+      if (JSON.stringify(st.fGen) !== clave) return;          // respuesta vieja: llegó otro filtro
+      st.general = datos; st.genClave = clave;
+    } catch (e) { if (el()) el().innerHTML = `<div class="error">${icono("alerta")}<span>${esc(e.message)}</span></div>`; return; }
+  }
+  if (!el()) return;
+  el().innerHTML = renderGeneral(st.general);
+  dibujarGraficos();
+}
+function renderGeneral(e) {
+  const r = e.resumen;
+  if (!r.conversaciones) return `<section class="panel"><div class="vacio"><h2>Sin mensajes en este filtro</h2>
+    <p>Ninguna conversación tiene mensajes en la carpeta o el rango de fechas elegidos.</p></div></section>`;
+  const dias = e.por_dia.map(d => ({etq: fmtDia(d.fecha, false), valor: d.mensajes, titulo: fmtDiaLargo(d.fecha), detalle: `${fmtN(d.mensajes)} mensajes`}));
+  const conv = e.por_conversacion.slice(0, 10), maxC = Math.max(1, ...conv.map(c => c.mensajes));
+  const ps = e.participantes.slice(0, 10), maxP = Math.max(1, ...ps.map(p => p.mensajes));
+  return `
+  <section class="panel kpis">
+    ${kpi("Conversaciones", fmtN(r.conversaciones), `de ${fmtN(st.casos.length)} importadas`)}
+    ${kpi("Mensajes", fmtN(r.mensajes), `${fmtN(r.mensajes_usuarios)} de participantes`)}
+    ${kpi("Participantes", fmtN(r.participantes), "nombres distintos")}
+    ${kpi("Período", `${fmtN(r.dias_periodo)} ${r.dias_periodo === 1 ? "día" : "días"}`, r.inicio ? `${fmtDia(r.inicio, false)} – ${fmtDia(r.fin)}` : "")}
+    ${kpi("Promedio diario", r.promedio_diario.toLocaleString("es-CR"), "mensajes por día")}
+    ${kpi("Adjuntos", fmtN(r.adjuntos), "referenciados en los chats")}
+  </section>
+  <div class="rejilla r-2" style="margin-top:20px">
+    <section class="panel"><div class="panel-cab"><div><h2>Actividad diaria</h2><p class="panel-desc">Mensajes de participantes por día, sumando las conversaciones del filtro</p></div></div>
+      <div class="panel-cuerpo">${dias.length ? columnas(dias) + tablaDatos(["Día", "Mensajes"], e.por_dia.map(d => [fmtDia(d.fecha), fmtN(d.mensajes)]))
+        : `<div class="vacio">Sin mensajes de participantes.</div>`}</div></section>
+    <section class="panel"><div class="panel-cab"><div><h2>Mensajes por conversación</h2>
+        <p class="panel-desc">${conv.length < e.por_conversacion.length ? `Las ${conv.length} más activas de ${e.por_conversacion.length}` : "Todas las conversaciones del filtro"}</p></div></div>
+      <div class="panel-cuerpo"><div class="hbarras">${conv.map(c => `<a class="nombre" href="#/caso/${encodeURIComponent(c.caso)}/resumen" title="${esc(c.chat)}">${esc(c.chat)}</a>
+        <div class="pista" data-tip-titulo="${esc(c.chat)}" data-tip="${fmtN(c.mensajes)} mensajes · ${c.participantes} ${c.participantes === 1 ? "participante" : "participantes"}"><div class="b" style="width:${100 * c.mensajes / maxC}%"></div></div>
+        <div class="v num">${fmtN(c.mensajes)}</div>`).join("")}</div></div></section>
+  </div>
+  <section class="panel tabla-scroll" style="margin-top:20px">
+    <div class="panel-cab"><div><h2>Participantes más activos</h2>
+      <p class="panel-desc">${ps.length < e.participantes.length ? `Los ${ps.length} con más mensajes de ${e.participantes.length}. ` : ""}Se agrupan por nombre: la misma persona en varios chats cuenta una vez.</p></div></div>
+    <div class="panel-cuerpo" style="padding:8px 0 4px"><table><thead><tr><th>Participante</th><th class="der">Mensajes</th><th>Participación</th>
+      <th class="der">Palabras por mensaje</th><th class="der">Multimedia</th><th>Primer mensaje</th><th>Último mensaje</th></tr></thead>
+    <tbody>${ps.map(p => `<tr><td><div class="persona"><span class="avatar">${esc(iniciales(p.autor))}</span>${esc(p.autor)}</div></td>
+      <td class="der num">${fmtN(p.mensajes)}</td>
+      <td><div class="barra-celda"><div class="barra-pista"><div class="barra" style="width:${100 * p.mensajes / maxP}%"></div></div>
+        <span class="num" style="color:var(--texto-2);font-size:12.5px;min-width:44px;text-align:right">${p.porcentaje.toLocaleString("es-CR")} %</span></div></td>
+      <td class="der num">${p.palabras_promedio.toLocaleString("es-CR")}</td><td class="der num">${fmtN(p.multimedia)}</td>
+      <td class="fecha">${fmtFechaHora(p.primero)}</td><td class="fecha">${fmtFechaHora(p.ultimo)}</td></tr>`).join("")}</tbody></table></div>
+  </section>
+  <div style="margin-top:20px">${vPatrones(e)}</div>
+  <div style="margin-top:20px">${bloqueContenido(e)}</div>`;
+}
+
+/* ================================================================ Caso: cabecera */
+function cabeceraCaso(vista) {
+  const m = st.datos.metadata;
+  const titulos = {resumen: "Resumen", participantes: "Participantes", mensajes: "Mensajes", estadisticas: "Estadísticas", patrones: "Patrones", evidencias: "Evidencias"};
+  return `
+  <div class="migas"><a href="#/conversaciones">Conversaciones</a>${icono("flecha")}<span>${esc(m.chat)}</span>${vista !== "resumen" ? `${icono("flecha")}<span>${titulos[vista] || ""}</span>` : ""}</div>
+  <div class="cabecera">
+    <div>
+      <h1>${vista === "resumen" ? esc(m.chat) : titulos[vista] || esc(m.chat)}</h1>
+      <div class="meta-linea">
+        <span class="estado">Procesado</span>
+        <span class="mono">${esc(st.caso)}</span>
+        <span>${esc(FUENTES[m.fuente] || m.fuente)}</span>
+        <span>${fmtDia(m.periodo.inicio)} – ${fmtDia(m.periodo.fin)}</span>
+        <span>Prioridad ${m.prioridad}</span>
+        <label class="etq-carpeta mover-caso" title="Carpeta de la conversación">${icono("carpeta")}
+          <select id="moverCaso" aria-label="Carpeta de la conversación">${opcionesCarpeta(st.datos.carpeta)}</select></label>
+      </div>
+    </div>
+    <button class="btn btn-texto btn-peligro btn-chico" id="btnBorrar">${icono("papelera")}Eliminar caso</button>
+  </div>`;
+}
+function enlazarCaso(vista) {
+  $("#btnBorrar").onclick = async () => {
+    if (!confirm(`¿Eliminar el caso "${st.caso}" y todos sus archivos? Esta acción no se puede deshacer.`)) return;
+    try {
+      await api(`/api/casos/${encodeURIComponent(st.caso)}`, {method: "DELETE"});
+      st.caso = null; st.datos = null; await cargarCasos(); ir("#/conversaciones");
+    } catch (e) { alert(e.message); }
+  };
+  $("#moverCaso").onchange = async e => {
+    try { await moverCasos([st.caso], e.target.value); } catch (err) { alert(err.message); e.target.value = st.datos.carpeta || ""; }
+  };
+  if (vista === "mensajes") enlazarMensajes();
+}
+
+/* ================================================================ Resumen */
+function vResumen() {
+  const {metadata: m, estadisticas: e} = st.datos, r = e.resumen;
+  const kpi = (etq, valor, nota) => `<div class="kpi"><div class="kpi-etq">${etq}</div><div class="kpi-valor">${valor}</div><div class="kpi-nota">${nota || "&nbsp;"}</div></div>`;
+  const dias = e.por_dia.map(d => ({etq: fmtDia(d.fecha, false), valor: d.mensajes, titulo: fmtDiaLargo(d.fecha), detalle: `${fmtN(d.mensajes)} mensajes`}));
+  const top = e.participantes.slice(0, 8), maxP = Math.max(1, ...top.map(p => p.mensajes));
+  const ent = m.importado || {};
+  const tipos = m.mensajes_por_tipo || {};
+  return `
+  ${(m.avisos || []).length ? `<div class="avisos" style="margin-bottom:20px">${m.avisos.map(a => `<div class="aviso">${icono("alerta")}<span>${esc(a)}</span></div>`).join("")}</div>` : ""}
+  <section class="panel kpis">
+    ${kpi("Mensajes", fmtN(r.mensajes), `${fmtN(r.mensajes_usuarios)} de participantes`)}
+    ${kpi("Participantes", fmtN(r.participantes), e.participantes[0] ? `Más activo: ${esc(e.participantes[0].autor)}` : "")}
+    ${kpi("Período", `${fmtN(r.dias_periodo)} ${r.dias_periodo === 1 ? "día" : "días"}`, `${fmtDia(m.periodo.inicio, false)} – ${fmtDia(m.periodo.fin)}`)}
+    ${kpi("Días activos", fmtN(r.dias_activos), r.dias_periodo ? `${Math.round(100 * r.dias_activos / r.dias_periodo)} % del período` : "")}
+    ${kpi("Promedio diario", r.promedio_diario.toLocaleString("es-CR"), "mensajes por día")}
+    ${kpi("Adjuntos", fmtN(r.adjuntos), `${Object.keys(m.files).length - 1} ${Object.keys(m.files).length - 1 === 1 ? "archivo incluido" : "archivos incluidos"}`)}
+  </section>
+
+  <div class="rejilla r-2" style="margin-top:20px">
+    <section class="panel">
+      <div class="panel-cab"><div><h2>Actividad diaria</h2><p class="panel-desc">Mensajes de participantes por día</p></div>
+        <a class="btn btn-texto btn-chico" href="#/caso/${encodeURIComponent(st.caso)}/patrones">Ver patrones</a></div>
+      <div class="panel-cuerpo">${dias.length ? columnas(dias) : `<div class="vacio">Sin mensajes de participantes.</div>`}
+        ${dias.length ? tablaDatos(["Día", "Mensajes"], e.por_dia.map(d => [fmtDia(d.fecha), fmtN(d.mensajes)])) : ""}</div>
+    </section>
+    <section class="panel">
+      <div class="panel-cab"><div><h2>Mensajes por participante</h2><p class="panel-desc">${top.length < e.participantes.length ? `Los ${top.length} más activos de ${e.participantes.length}` : "Todos los participantes"}</p></div>
+        <a class="btn btn-texto btn-chico" href="#/caso/${encodeURIComponent(st.caso)}/participantes">Ver todos</a></div>
+      <div class="panel-cuerpo"><div class="hbarras">
+        ${top.map(p => `<div class="nombre" title="${esc(p.autor)}">${esc(p.autor)}</div>
+          <div class="pista" data-tip-titulo="${esc(p.autor)}" data-tip="${fmtN(p.mensajes)} mensajes · ${p.porcentaje.toLocaleString("es-CR")} %"><div class="b" style="width:${100 * p.mensajes / maxP}%"></div></div>
+          <div class="v num">${fmtN(p.mensajes)}</div>`).join("") || `<div class="vacio">Sin participantes.</div>`}
+      </div></div>
+    </section>
+  </div>
+
+  <div class="rejilla r-11" style="margin-top:20px">
+    <section class="panel">
+      <div class="panel-cab"><div><h2>Procesamiento</h2><p class="panel-desc">Registro de la importación de este caso</p></div></div>
+      <div class="panel-cuerpo"><ol class="pasos">
+        <li class="paso hecho"><span class="paso-marca">✓</span><div><div class="paso-titulo">Exportación recibida</div>
+          <div class="paso-detalle">${esc(ent.archivo_entrada || "—")}${ent.sha256_entrada ? ` · <span class="mono">${ent.sha256_entrada.slice(0, 16)}…</span>` : ""}</div></div></li>
+        <li class="paso hecho"><span class="paso-marca">✓</span><div><div class="paso-titulo">Formato analizado</div>
+          <div class="paso-detalle">${fmtN(m.total_mensajes)} mensajes · ${Object.entries(tipos).map(([t, n]) => `${fmtN(n)} ${(TIPOS[t] || t).toLowerCase()}`).join(" · ")}</div></div></li>
+        <li class="paso hecho"><span class="paso-marca">✓</span><div><div class="paso-titulo">Evidencias registradas</div>
+          <div class="paso-detalle">${Object.keys(m.files).length} ${Object.keys(m.files).length === 1 ? "archivo" : "archivos"} con SHA-256${m.adjuntos_faltantes.length ? ` · ${m.adjuntos_faltantes.length} adjuntos no incluidos` : ""}</div></div></li>
+        <li class="paso hecho"><span class="paso-marca">✓</span><div><div class="paso-titulo">${m.declaracion ? "Consentimiento declarado" : "Datos sintéticos"}</div>
+          <div class="paso-detalle">${m.declaracion ? `${esc(m.declaracion.declarado_por)} · ${fmtFechaHora(m.declaracion.fecha)}` : "Generados por el equipo; no requieren declaración"}</div></div></li>
+      </ol></div>
+    </section>
+    <section class="panel">
+      <div class="panel-cab"><div><h2>Detalles de la conversación</h2></div></div>
+      <div class="panel-cuerpo"><dl class="lista-def">
+        <dt>Chat</dt><dd>${esc(m.chat)}</dd>
+        <dt>Participantes</dt><dd>${m.participantes.map(esc).join(", ") || "—"}</dd>
+        <dt>Primer mensaje</dt><dd>${fmtFechaHora(m.periodo.inicio)}</dd>
+        <dt>Último mensaje</dt><dd>${fmtFechaHora(m.periodo.fin)}</dd>
+        <dt>Día de mayor actividad</dt><dd>${r.dia_pico ? `${fmtDiaLargo(r.dia_pico.fecha)} · ${fmtN(r.dia_pico.mensajes)} mensajes` : "—"}</dd>
+        <dt>Importada</dt><dd>${ent.fecha ? fmtFechaHora(ent.fecha) : "—"}</dd>
+      </dl></div>
+    </section>
+  </div>`;
+}
+
+/* ================================================================ Participantes */
+function vParticipantes() {
+  const ps = st.datos.estadisticas.participantes, maxP = Math.max(1, ...ps.map(p => p.mensajes));
+  const telefonos = ps.filter(p => esTelefono(p.autor)).length;
+  return `
+  ${telefonos ? `<div class="aviso" style="margin-bottom:20px">${icono("alerta")}<span>${telefonos} ${telefonos === 1 ? "participante aparece" : "participantes aparecen"} como número de teléfono. Use contactos con nombre ficticio para no exponer números reales.</span></div>` : ""}
+  <section class="panel tabla-scroll">${ps.length ? `<table>
+    <thead><tr><th>Participante</th><th class="der">Mensajes</th><th>Participación</th><th class="der">Palabras por mensaje</th>
+      <th class="der">Multimedia</th><th class="der">Respuesta mediana</th><th>Primer mensaje</th><th>Último mensaje</th></tr></thead>
+    <tbody>${ps.map(p => `<tr>
+      <td><div class="persona"><span class="avatar">${esc(iniciales(p.autor))}</span>${esc(p.autor)}
+        ${esTelefono(p.autor) ? `<span class="etiqueta" style="background:var(--aviso-fondo);border-color:var(--aviso-borde);color:var(--aviso-texto)">teléfono</span>` : ""}</div></td>
+      <td class="der num">${fmtN(p.mensajes)}</td>
+      <td><div class="barra-celda"><div class="barra-pista"><div class="barra" style="width:${100 * p.mensajes / maxP}%"></div></div>
+        <span class="num" style="color:var(--texto-2);font-size:12.5px;min-width:44px;text-align:right">${p.porcentaje.toLocaleString("es-CR")} %</span></div></td>
+      <td class="der num">${p.palabras_promedio.toLocaleString("es-CR")}</td>
+      <td class="der num">${fmtN(p.multimedia)}</td>
+      <td class="der num" title="${p.respuestas} respuestas medidas">${fmtMin(p.respuesta_mediana_min)}</td>
+      <td class="fecha">${fmtFechaHora(p.primero)}</td><td class="fecha">${fmtFechaHora(p.ultimo)}</td></tr>`).join("")}</tbody></table>`
+    : `<div class="vacio"><h2>Sin participantes</h2><p>La conversación solo contiene mensajes del sistema.</p></div>`}
+  </section>
+  <p class="panel-desc" style="margin-top:12px">La respuesta mediana mide los minutos entre un mensaje y el siguiente de otra persona; no se cuentan pausas de más de 12 horas.</p>`;
+}
+
+/* ================================================================ Mensajes */
+function vMensajes() {
+  const {metadata: m} = st.datos, conteo = m.mensajes_por_tipo || {};
+  return `<section class="panel">
+    <div class="barra-herr">
+      <div class="buscador">${icono("buscar")}<input type="search" id="buscar" placeholder="Buscar en mensajes, autores o archivos" value="${esc(st.busqueda)}"></div>
+      <select id="autor" aria-label="Participante"><option value="">Todos los participantes</option>
+        ${m.participantes.map(a => `<option ${st.filtroAutor === a ? "selected" : ""}>${esc(a)}</option>`).join("")}</select>
+    </div>
+    <div class="segmentos">
+      <button class="seg ${!st.filtroTipo ? "activo" : ""}" data-tipo="">Todos<b>${fmtN(m.total_mensajes)}</b></button>
+      ${Object.entries(conteo).map(([t, n]) => `<button class="seg ${st.filtroTipo === t ? "activo" : ""}" data-tipo="${t}">${TIPOS[t] || t}<b>${fmtN(n)}</b></button>`).join("")}
+      <span class="contador" id="contador"></span>
+    </div>
+    <div id="hilo"></div>
+  </section>`;
+}
+function enlazarMensajes() {
+  document.querySelectorAll(".seg").forEach(b => b.onclick = () => {
+    st.filtroTipo = b.dataset.tipo || null; st.mostrando = PAGINA;
+    document.querySelectorAll(".seg").forEach(x => x.classList.toggle("activo", x === b)); renderHilo(); });
+  $("#autor").onchange = e => { st.filtroAutor = e.target.value; st.mostrando = PAGINA; renderHilo(); };
+  let t; $("#buscar").oninput = e => { clearTimeout(t); t = setTimeout(() => { st.busqueda = e.target.value; st.mostrando = PAGINA; renderHilo(); }, 180); };
+  renderHilo();
+}
+function renderHilo() {
+  const {mensajes, metadata} = st.datos, q = st.busqueda.trim().toLowerCase();
+  const lista = mensajes.filter(x => (!st.filtroTipo || x.tipo === st.filtroTipo) && (!st.filtroAutor || x.autor === st.filtroAutor) &&
+    (!q || (x.texto || "").toLowerCase().includes(q) || (x.autor || "").toLowerCase().includes(q) || (x.adjunto || "").toLowerCase().includes(q)));
+  $("#contador").textContent = lista.length === mensajes.length ? "" : `${fmtN(lista.length)} coincidencias`;
+  const marcar = s => { const e = esc(s); if (!q) return e;
+    return e.replace(new RegExp(esc(q).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), x => `<mark>${x}</mark>`); };
+  let h = "", dia = "";
+  for (const x of lista.slice(0, st.mostrando)) {
+    const d = x.fecha_hora.slice(0, 10);
+    if (d !== dia) { h += `<div class="separador-dia">${fmtDiaLargo(x.fecha_hora)}</div>`; dia = d; }
+    const ref = `<span class="ref" title="Identificador del mensaje y línea en chat.txt">#${x.id} · línea ${x.linea}</span>`;
+    if (x.tipo === "sistema") { h += `<div class="mensaje sistema">${marcar(x.texto)} · ${fmtHora(x.fecha_hora)}</div>`; continue; }
+    let adj = "";
+    if (x.adjunto) {
+      const f = metadata.files[x.adjunto], url = `/media/${encodeURIComponent(st.caso)}/${encodeURIComponent(x.adjunto)}`;
+      if (!f) adj = `<span class="archivo falta">${icono("archivo")}${esc(x.adjunto)} <small>no incluido en la exportación</small></span>`;
+      else if (x.tipo === "imagen") adj = `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${esc(x.adjunto)}" loading="lazy"></a>`;
+      else if (x.tipo === "voz" || x.tipo === "audio") adj = `<audio controls preload="none" src="${url}"></audio><div><span class="archivo" style="margin-top:4px">${icono("mic")}${marcar(x.adjunto)} <small>${fmtBytes(f.bytes)}</small></span></div>`;
+      else if (x.tipo === "video") adj = `<video controls preload="metadata" src="${url}"></video>`;
+      else adj = `<a class="archivo" href="${url}" target="_blank" rel="noopener">${icono("archivo")}${marcar(x.adjunto)} <small>${fmtBytes(f.bytes)}</small></a>`;
+      adj = `<div class="adjunto">${adj}</div>`;
+    }
+    const apagado = x.tipo === "omitido" || x.tipo === "eliminado";
+    h += `<div class="mensaje"><span class="avatar">${esc(iniciales(x.autor))}</span><div>
+      <div class="mensaje-cab"><b>${marcar(x.autor)}</b><span class="hora">${fmtHora(x.fecha_hora)}</span>${ref}</div>
+      ${x.texto ? `<div class="mensaje-texto ${apagado ? "apagado" : ""}">${marcar(x.texto)}</div>` : ""}${adj}</div></div>`;
+  }
+  if (!lista.length) h = `<div class="vacio"><h2>Sin resultados</h2><p>Ningún mensaje coincide con los filtros.</p></div>`;
+  if (lista.length > st.mostrando) h += `<div class="mas"><button class="btn btn-chico" id="btnMas">Mostrar ${fmtN(Math.min(PAGINA, lista.length - st.mostrando))} más · quedan ${fmtN(lista.length - st.mostrando)}</button></div>`;
+  $("#hilo").innerHTML = `<div class="hilo">${h}</div>`;
+  const mas = $("#btnMas"); if (mas) mas.onclick = () => { st.mostrando += PAGINA; renderHilo(); };
+}
+
+/* ================================================================ Estadísticas */
+const filaBarra = (v, max) => `<div class="barra-celda"><div class="barra-pista"><div class="barra" style="width:${100 * v / max}%"></div></div></div>`;
+/** Tipos de mensaje y palabras frecuentes (por chat y en el panorama general). */
+function bloqueContenido(e) {
+  const tipos = Object.entries(e.por_tipo), totalT = tipos.reduce((a, [, n]) => a + n, 0) || 1, maxT = Math.max(1, ...tipos.map(([, n]) => n));
+  const maxW = Math.max(1, ...e.palabras.map(([, n]) => n));
+  return `
+  <div class="rejilla r-11 arriba">
+    <section class="panel">
+      <div class="panel-cab"><div><h2>Distribución por tipo de mensaje</h2><p class="panel-desc">${fmtN(totalT)} mensajes, incluidos los del sistema</p></div></div>
+      <div class="panel-cuerpo" style="padding:8px 0 4px"><table><thead><tr><th>Tipo</th><th class="der">Mensajes</th><th class="der">%</th><th style="width:40%"></th></tr></thead>
+        <tbody>${tipos.map(([t, n]) => `<tr><td>${TIPOS[t] || t}</td><td class="der num">${fmtN(n)}</td>
+          <td class="der num" style="color:var(--texto-2)">${(100 * n / totalT).toLocaleString("es-CR", {maximumFractionDigits: 1})}</td><td>${filaBarra(n, maxT)}</td></tr>`).join("")}</tbody></table></div>
+    </section>
+    <section class="panel">
+      <div class="panel-cab"><div><h2>Palabras más frecuentes</h2><p class="panel-desc">Mensajes de texto, sin palabras vacías ni enlaces</p></div></div>
+      <div class="panel-cuerpo" style="padding:8px 0 4px">${e.palabras.length ? `<table><thead><tr><th class="der" style="width:40px">#</th><th>Palabra</th><th class="der">Veces</th><th style="width:40%"></th></tr></thead>
+        <tbody>${e.palabras.slice(0, 15).map(([p, n], i) => `<tr><td class="der num" style="color:var(--texto-2)">${i + 1}</td><td>${esc(p)}</td><td class="der num">${fmtN(n)}</td><td>${filaBarra(n, maxW)}</td></tr>`).join("")}</tbody></table>`
+        : `<div class="vacio">No hay suficientes palabras para analizar.</div>`}</div>
+    </section>
+  </div>`;
+}
+function vEstadisticas() {
+  const {metadata: m, estadisticas: e} = st.datos;
+  const maxD = Math.max(1, ...e.dominios.map(([, n]) => n));
+  return `${bloqueContenido(e)}
+  <div class="rejilla r-11" style="margin-top:20px">
+    <section class="panel">
+      <div class="panel-cab"><div><h2>Enlaces compartidos</h2><p class="panel-desc">Dominios citados en los mensajes</p></div></div>
+      <div class="panel-cuerpo" style="padding:8px 0 4px">${e.dominios.length ? `<table><thead><tr><th>Dominio</th><th class="der">Enlaces</th><th style="width:40%"></th></tr></thead>
+        <tbody>${e.dominios.map(([d, n]) => `<tr><td>${esc(d)}</td><td class="der num">${fmtN(n)}</td><td>${filaBarra(n, maxD)}</td></tr>`).join("")}</tbody></table>`
+        : `<div class="vacio">No se compartieron enlaces en esta conversación.</div>`}</div>
+    </section>
+    <section class="panel">
+      <div class="panel-cab"><div><h2>Contenido multimedia</h2><p class="panel-desc">Adjuntos referenciados en el chat</p></div></div>
+      <div class="panel-cuerpo"><dl class="lista-def">
+        <dt>Incluidos en la exportación</dt><dd class="num">${fmtN(Object.keys(m.files).length - 1)}</dd>
+        <dt>Referenciados sin archivo</dt><dd class="num">${fmtN(m.adjuntos_faltantes.length)}</dd>
+        <dt>Marcados como omitidos</dt><dd class="num">${fmtN((m.mensajes_por_tipo || {}).omitido || 0)}</dd>
+        <dt>Archivos sin referencia</dt><dd class="num">${fmtN((m.archivos_no_referenciados || []).length)}</dd>
+        <dt>Tamaño total</dt><dd class="num">${fmtBytes(Object.values(m.files).reduce((a, f) => a + (f.bytes || 0), 0))}</dd>
+      </dl></div>
+    </section>
+  </div>`;
+}
+
+/* ================================================================ Patrones */
+function vPatrones(e = st.datos.estadisticas) {
+  const r = e.resumen;
+  const max = Math.max(1, ...e.calor.flat());
+  const horas = e.por_hora.map((v, h) => ({etq: `${h}`, valor: v, titulo: `${String(h).padStart(2, "0")}:00 – ${String(h).padStart(2, "0")}:59`, detalle: `${fmtN(v)} mensajes`}));
+  const semana = e.por_dia_semana.map((v, d) => ({etq: DIAS[d].slice(0, 3), valor: v, titulo: DIAS[d], detalle: `${fmtN(v)} mensajes`}));
+  const diaSemPico = e.por_dia_semana.indexOf(Math.max(...e.por_dia_semana));
+  const total = r.mensajes_usuarios || 1;
+  const noche = e.por_hora.slice(0, 6).reduce((a, b) => a + b, 0);
+  const rango = h => `${String(h).padStart(2, "0")}:00 – ${String(h).padStart(2, "0")}:59`;
+  return `
+  <section class="panel hallazgos">
+    <div class="hallazgo"><div class="kpi-etq">Hora de mayor actividad</div>
+      <div class="kpi-valor">${r.hora_pico != null ? rango(r.hora_pico) : "—"}</div>
+      <div class="kpi-nota">${r.hora_pico != null ? `${fmtN(e.por_hora[r.hora_pico])} mensajes · ${Math.round(100 * e.por_hora[r.hora_pico] / total)} % del total` : ""}</div></div>
+    <div class="hallazgo"><div class="kpi-etq">Día de la semana más activo</div>
+      <div class="kpi-valor">${r.mensajes_usuarios ? DIAS[diaSemPico] : "—"}</div>
+      <div class="kpi-nota">${r.mensajes_usuarios ? `${fmtN(e.por_dia_semana[diaSemPico])} mensajes` : ""}</div></div>
+    <div class="hallazgo"><div class="kpi-etq">Actividad de madrugada (00:00 – 05:59)</div>
+      <div class="kpi-valor">${Math.round(100 * noche / total)} %</div>
+      <div class="kpi-nota">${fmtN(noche)} mensajes</div></div>
+  </section>
+
+  <section class="panel" style="margin-top:20px">
+    <div class="panel-cab"><div><h2>Mapa de actividad</h2><p class="panel-desc">Mensajes por día de la semana y hora del día</p></div>
+      <div class="leyenda-sec">Menos <i style="background:var(--s0);border:1px solid var(--borde)"></i><i style="background:var(--s1)"></i><i style="background:var(--s2)"></i><i style="background:var(--s3)"></i><i style="background:var(--s4)"></i><i style="background:var(--s5)"></i> Más</div></div>
+    <div class="panel-cuerpo"><div class="calor">
+      <span></span>${Array.from({length: 24}, (_, h) => `<span class="h">${h % 3 === 0 ? h : ""}</span>`).join("")}
+      ${e.calor.map((fila, d) => `<span class="dia">${DIAS[d].slice(0, 3)}</span>` + fila.map((v, h) =>
+        `<span class="celda" style="background:${colorSecuencial(v, max)}" data-tip-titulo="${DIAS[d]}, ${rango(h)}" data-tip="${fmtN(v)} mensajes"></span>`).join("")).join("")}
+    </div>
+    ${tablaDatos(["Día", ...Array.from({length: 24}, (_, h) => h)], e.calor.map((f, d) => [DIAS[d], ...f.map(fmtN)]))}</div>
+  </section>
+
+  <div class="rejilla r-11" style="margin-top:20px">
+    <section class="panel"><div class="panel-cab"><div><h2>Por hora del día</h2><p class="panel-desc">Total de mensajes en cada hora</p></div></div>
+      <div class="panel-cuerpo">${columnas(horas, {alto: 190, minSep: 26})}</div></section>
+    <section class="panel"><div class="panel-cab"><div><h2>Por día de la semana</h2><p class="panel-desc">Total de mensajes en cada día</p></div></div>
+      <div class="panel-cuerpo">${columnas(semana, {alto: 190, minSep: 30})}</div></section>
+  </div>`;
+}
+
+/* ================================================================ Evidencias */
+function vEvidencias() {
+  const m = st.datos.metadata;
+  const url = n => `/media/${encodeURIComponent(st.caso)}/${encodeURIComponent(n)}`;
+  return `
+  <p class="subtitulo" style="margin:-12px 0 20px">Huella SHA-256 de cada archivo registrada al importar. Es el punto de partida de la cadena de custodia.</p>
+  <section class="panel tabla-scroll"><table>
+    <thead><tr><th>Archivo</th><th>Tipo</th><th>Mensaje de origen</th><th class="der">Tamaño</th><th>SHA-256</th></tr></thead>
+    <tbody>${Object.entries(m.files).map(([n, f]) => `<tr>
+      <td><a href="${url(n)}" target="_blank" rel="noopener">${esc(n)}</a></td>
+      <td>${f.tipo === "chat" ? "Conversación" : TIPOS[f.tipo] || esc(f.tipo)}</td>
+      <td>${f.mensaje_id ? `<span class="mono">#${f.mensaje_id} · línea ${f.linea}</span><div style="font-size:12px;color:var(--texto-2)">${esc(f.autor)} · ${fmtFechaHora(f.fecha_hora)}</div>` : f.mensajes ? `${fmtN(f.mensajes)} mensajes` : "—"}</td>
+      <td class="der num">${f.bytes != null ? fmtBytes(f.bytes) : "—"}</td>
+      <td class="hash">${esc(f.sha256)}</td></tr>`).join("")}</tbody></table></section>
+
+  ${m.adjuntos_faltantes.length || (m.archivos_no_referenciados || []).length ? `<div class="rejilla r-11" style="margin-top:20px">
+    <section class="panel"><div class="panel-cab"><div><h2>Adjuntos no incluidos</h2><p class="panel-desc">Referenciados en el chat pero ausentes en la exportación</p></div></div>
+      <div class="panel-cuerpo" style="padding:8px 0 4px">${m.adjuntos_faltantes.length ? `<table><tbody>${m.adjuntos_faltantes.map(f => `<tr><td>${esc(f.archivo)}</td><td class="mono" style="color:var(--texto-2)">#${f.mensaje_id} · línea ${f.linea}</td></tr>`).join("")}</tbody></table>` : `<div class="vacio">Ninguno.</div>`}</div></section>
+    <section class="panel"><div class="panel-cab"><div><h2>Archivos sin referencia</h2><p class="panel-desc">Venían en la exportación pero ningún mensaje los cita; no se copiaron</p></div></div>
+      <div class="panel-cuerpo" style="padding:8px 0 4px">${(m.archivos_no_referenciados || []).length ? `<table><tbody>${m.archivos_no_referenciados.map(n => `<tr><td>${esc(n)}</td></tr>`).join("")}</tbody></table>` : `<div class="vacio">Ninguno.</div>`}</div></section>
+  </div>` : ""}
+
+  <section class="panel" style="margin-top:20px"><details>
+    <summary class="panel-cab" style="padding-bottom:16px;cursor:pointer;list-style:none"><div><h2>metadata.json</h2>
+      <p class="panel-desc">Documento que acompaña al caso cuando se envía al coordinador</p></div>${icono("flecha")}</summary>
+    <pre class="json">${esc(JSON.stringify(m, null, 2))}</pre>
+  </details></section>`;
+}
+
+/* ================================================================ Ajustes */
+function vAjustes() {
+  return `
+  <div class="cabecera"><div><h1>Ajustes</h1><p class="subtitulo">Valores predeterminados para nuevas importaciones e información del entorno local.</p></div></div>
+  <div class="rejilla r-11">
+    <section class="panel"><div class="panel-cab"><div><h2>Importación</h2><p class="panel-desc">Se guardan en este navegador</p></div></div>
+      <div class="panel-cuerpo">
+        <label class="campo" for="pFuente">Fuente predeterminada</label>
+        <select id="pFuente">${Object.entries(FUENTES).map(([k, t]) => `<option value="${k}" ${(prefs.fuente || "manual") === k ? "selected" : ""}>${t}</option>`).join("")}</select>
+        <label class="campo" for="pPrioridad" style="margin-top:14px">Prioridad predeterminada</label>
+        <input type="number" id="pPrioridad" min="1" max="10" value="${prefs.prioridad || 5}" style="max-width:120px">
+        <div style="margin-top:16px"><button class="btn btn-primario btn-chico" id="btnGuardar">Guardar</button> <span id="guardado" style="font-size:12.5px;color:var(--texto-2)"></span></div>
+      </div></section>
+    <section class="panel"><div class="panel-cab"><div><h2>Entorno</h2></div></div>
+      <div class="panel-cuerpo"><dl class="lista-def" style="grid-template-columns:150px 1fr">
+        <dt>Servidor</dt><dd class="mono">${esc(location.host)}</dd>
+        <dt>Carpeta de casos</dt><dd class="mono">${esc(st.carpeta)}</dd>
+        <dt>Casos guardados</dt><dd class="num">${fmtN(st.casos.length)}</dd>
+        <dt>Declaración</dt><dd>Obligatoria para fuentes distintas del generador sintético</dd>
+      </dl></div></section>
+  </div>`;
+}
+function enlazarAjustes() {
+  $("#btnGuardar").onclick = () => {
+    prefs.fuente = $("#pFuente").value; prefs.prioridad = Math.min(10, Math.max(1, +$("#pPrioridad").value || 5));
+    guardarPrefs(); $("#guardado").textContent = "Guardado.";
+  };
+}
+
+/* ================================================================ inicio */
+cargarCasos().catch(e => { st.casos = []; console.error(e); }).finally(renderizar);
+</script>
+</body>
+</html>
